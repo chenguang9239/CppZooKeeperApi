@@ -1,27 +1,26 @@
-#include "CppZookeeper.h"
+#include "CppZooKeeper.h"
 
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <arpa/inet.h>
-
+#include <stdio.h>
 #include <cstring>
+
+//#include <boost/asio.hpp>
+//#include <boost/algorithm/string/trim.hpp>
+//#include <boost/algorithm/string/split.hpp>
 
 #ifdef CPP_ZK_USE_BOOST
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
 #endif
 
-#define ERR_LOG(a,b,format,...)    fprintf(stderr, format,##__VA_ARGS__)
-#define WARN_LOG(a,b,format,...)   fprintf(stderr, format,##__VA_ARGS__)
-#define INFO_LOG(a,b,format,...)   fprintf(stdout, format,##__VA_ARGS__)
-#define DEBUG_LOG(a,b,format,...)  fprintf(stdout, format,##__VA_ARGS__)
-
 // hashtable_search需要包含
-#include <hashtable/hashtable_private.h>
+#include "zookeeper/hashtable_private.h"
 
 // 这个宏必须加上，因为封装API基于多线程，多线程和单线程的对象是不一样的，二者不能共用
 #define THREADED
-#include <zk_adaptor.h>
+#include "zookeeper/zk_adaptor.h"
 
 // 用于删除注册的Watcher，数据结构从zk_hashtable.c中获得
 typedef struct _watcher_object
@@ -43,8 +42,58 @@ struct watcher_object_list
 
 using namespace std;
 
-namespace zookeeper
+
+
+namespace CppZooKeeper
 {
+static FILE *logStream = stdout;
+static CPP_ZOO_KEEPER_LOG_LEVEL logLevel = INFO_LEVEL;
+
+#define ERR_LOG(a,b,format,...) if(logLevel <= ERROR_LEVEL){ \
+                                   fprintf(logStream, "%s[%s|%d]", now(), __FILE__, __LINE__); \
+                                   fprintf(logStream, format,##__VA_ARGS__); \
+                                   fprintf(logStream, "\n",##__VA_ARGS__); }
+
+#define WARN_LOG(a,b,format,...) if(logLevel <= WARN_LEVEL){ \
+                                   fprintf(logStream, "%s[%s|%d]", now(), __FILE__, __LINE__); \
+                                   fprintf(logStream, format,##__VA_ARGS__); \
+                                   fprintf(logStream, "\n",##__VA_ARGS__); }
+
+#define INFO_LOG(a,b,format,...) if(logLevel <= INFO_LEVEL){ \
+                                   fprintf(logStream, "%s[%s|%d]", now(), __FILE__, __LINE__); \
+                                   fprintf(logStream, format,##__VA_ARGS__); \
+                                   fprintf(logStream, "\n",##__VA_ARGS__); }
+
+#define DEBUG_LOG(a,b,format,...) if(logLevel <= DEBUG_LEVEL){ \
+                                   fprintf(logStream, "%s[%s|%d]", now(), __FILE__, __LINE__); \
+                                    fprintf(logStream, format,##__VA_ARGS__); \
+                                    fprintf(logStream, "\n",##__VA_ARGS__); }
+
+char* now(){
+    time_t t;
+    time(&t);
+    return ctime(&t);
+}
+
+void setCppZooKeeperLog(const std::string &path, CPP_ZOO_KEEPER_LOG_LEVEL level){
+    if(!path.empty()){
+        logStream = fopen(path.c_str(), "a+");
+    }
+    setvbuf(logStream,NULL,_IOLBF,0);
+    logLevel = level;
+}
+
+void setZookeeperCAPILog(const std::string &path, ZooLogLevel level) {
+    zoo_set_debug_level(level);
+    if (!path.empty()) {
+        FILE *fp = nullptr;
+        fp = fopen(path.c_str(), "a+");
+        if (nullptr == fp) ERR_LOG(0, 0, "can not create zkCApi log: %s", path.c_str());
+        zoo_set_log_stream(fp);
+        INFO_LOG(0, 0, "set zkCApi log ok: %s", path.c_str());
+    }
+}
+
 
 void SplitStr(string str, const vector<string> &splitStr, vector<string> &result, bool removeEmptyElm = true, size_t maxCount = 0)
 {
@@ -223,7 +272,8 @@ int32_t ZookeeperManager::InitFromFile(const string &config_file_path, const cli
 }
 #endif
 
-int32_t ZookeeperManager::Init(const string &hosts, const string &root_path /*= "/"*/,
+int32_t ZookeeperManager::Init(const string &hosts,
+                               const string &root_path /*= "/"*/,
                                const clientid_t *client_id/*= NULL*/)
 {
     m_hosts = hosts;
@@ -236,7 +286,6 @@ int32_t ZookeeperManager::Init(const string &hosts, const string &root_path /*= 
         return ZBADARGUMENTS;
     }
 
-    zoo_set_debug_level(ZOO_LOG_LEVEL_ERROR);
     if (client_id != NULL)
     {
         m_zk_client_id = *client_id;
@@ -266,9 +315,23 @@ int32_t ZookeeperManager::Connect(shared_ptr<WatcherFunType> global_watcher_fun,
         m_global_watcher_context->m_watcher_fun = global_watcher_fun;
     }
 
+    // 根据传入hosts，判断是否为域名
+    // 连接(以及重连时)根据域名解析IP+port，逗号分隔
+//    std::string connString = needToParse(m_hosts) ? parseDomain(m_hosts) : m_hosts;
+//    if(connString.empty()){
+//        ERR_LOG(0, 0, "从域名解析地址为空,host[%s],connString[%s],errno[%d],error[%s].",
+//                m_hosts.c_str(), connString.c_str(), errno, zerror(errno));
+//        return -1; // ZSYSTEMERROR
+//    }
+//
+//    m_zhandle = zookeeper_init(connString.c_str(), &ZookeeperManager::InnerWatcher, recv_timeout_ms,
+//                               m_zk_client_id.client_id != 0 ? &m_zk_client_id : NULL,
+//                               m_global_watcher_context.get(), 0);
+
     m_zhandle = zookeeper_init(m_hosts.c_str(), &ZookeeperManager::InnerWatcher, recv_timeout_ms,
                                m_zk_client_id.client_id != 0 ? &m_zk_client_id : NULL,
                                m_global_watcher_context.get(), 0);
+
     if (m_zhandle == NULL)
     {
         ERR_LOG(0, 0, "Zookeeper:zookeeper_init错误,返回句柄为NULL,host[%s],errno[%d],error[%s].",
@@ -868,6 +931,83 @@ int32_t ZookeeperManager::Create(const string &path, const string &value, string
     return Create(path, value.data(), value.size(), p_real_path, acl, flags, ephemeral_exist_skip);
 }
 
+int32_t ZookeeperManager::CreateRecursively(
+        const std::string &path,
+        const std::string &value,
+        std::string *p_real_path /*= NULL*/,
+        const ACL_vector *acl /*= &ZOO_OPEN_ACL_UNSAFE*/,
+        int flags /*= 0*/,
+        bool ephemeral_exist_skip /*= false*/){
+
+    std::string zkPath = path;
+    if(zkPath.front() != '/') zkPath = "/" + zkPath;
+    while(!zkPath.empty() && zkPath.back() == '/') zkPath.pop_back();
+    if(zkPath.size() > 1){
+        size_t parentNodeEndIndex = zkPath.find_last_of('/');
+        if(parentNodeEndIndex != std::string::npos) {
+            std::string parentNodePath = zkPath.substr(0, parentNodeEndIndex);
+            int ret = CreatePathRecursion(parentNodePath);
+            if(ZOK == ret){
+                INFO_LOG(0, 0, "Zookeeper: create parent node ok: path[%s],ret[%d],zerror[%s].",
+                         parentNodePath.c_str(), ret, zerror(ret));
+            }else{
+                ERR_LOG(0, 0, "Zookeeper: create parent node error: path[%s],ret[%d],zerror[%s].",
+                        parentNodePath.c_str(), ret, zerror(ret));
+            }
+        }
+
+        int ret = Create(zkPath, value, p_real_path, acl, flags, ephemeral_exist_skip);
+        if (ZOK == ret) {
+            INFO_LOG(0, 0, "Zookeeper: create node ok: path[%s],ret[%d],zerror[%s].",
+                     zkPath.c_str(), ret, zerror(ret));
+        } else if (ZNODEEXISTS == ret){
+            WARN_LOG(0, 0, "Zookeeper: Create node warning: path[%s],ret[%d],zerror[%s].",
+                     zkPath.c_str(), ret, zerror(ret));
+        }
+        else {
+            ERR_LOG(0, 0, "Zookeeper: Create node error: path[%s],ret[%d],zerror[%s].",
+                    zkPath.c_str(), ret, zerror(ret));
+        }
+
+        return ret;
+//        std::string tmpPath;
+//        size_t i = zkPath.find_first_of('/', 1);
+//        for (size_t i = zkPath.find_first_of('/', 1); i < zkPath.size() || i == std::string::npos;) {
+//            std::string returnedPath;
+//            returnedPath.resize(1024);
+//            if (i == std::string::npos) i = zkPath.size();
+//            tmpPath = zkPath.substr(0, i);
+//
+//            Stat stat;
+//            int ret = Exists(tmpPath, &stat);
+//            if (ZNONODE == ret) {
+//                int ret = Create(tmpPath, value, p_real_path, acl,
+//                                 i == zkPath.size() ? nodeFlags : parentNodesflags, ephemeral_exist_skip);
+//                if (ZOK == ret) {
+//                    returnedPath.shrink_to_fit();
+//                    INFO_LOG(0, 0, "Zookeeper: create node ok: path[%s],ret[%d],zerror[%s].",
+//                             returnedPath.c_str(), ret, zerror(ret));
+//                } else {
+//                    ERR_LOG(0, 0, "Zookeeper: Create node error: path[%s],ret[%d],zerror[%s].",
+//                            tmpPath.c_str(), ret, zerror(ret));
+//                }
+//                return ret;
+//            } else if (ZOK == ret) {
+//                DEBUG_LOG(0, 0, "Zookeeper: check node existance ok: path[%s],ret[%d],zerror[%s].",
+//                          tmpPath.c_str(), ret, zerror(ret));
+//            } else {
+//                ERR_LOG(0, 0, "Zookeeper: check node existance error: path[%s],ret[%d],zerror[%s].",
+//                        tmpPath.c_str(), ret, zerror(ret));
+//            }
+//
+//            if (i != zkPath.size()) i = zkPath.find_first_of('/', i + 1);
+//        }
+    }else{
+        ERR_LOG(0, 0, "Zookeeper: illegal path:path[%s].", path.c_str());
+        return ILLEGAL_PATH;
+    }
+}
+
 int32_t ZookeeperManager::ASet(const string &path, const char *buffer, int buflen,
                                int version, shared_ptr<StatCompletionFunType> stat_completion_fun)
 {
@@ -1350,6 +1490,67 @@ int32_t ZookeeperManager::GetCString(const string &path, string &data, Stat *sta
     return ret;
 }
 
+//std::vector<std::string> ZookeeperManager::splitString(const std::string &s, const std::string &with) {
+//    std::vector<std::string> res;
+//    std::string tmp = s;
+//    boost::algorithm::trim_if(tmp, boost::algorithm::is_any_of(with));
+//    boost::algorithm::split(res, tmp, boost::algorithm::is_any_of(with), boost::algorithm::token_compress_on);
+//
+//    return res;
+//}
+//
+//std::string ZookeeperManager::getHost(const std::string &address) {
+//    return address.find(':') == std::string::npos ? address : splitString(address, ":").front();
+//}
+//
+//std::string ZookeeperManager::getPort(const std::string &address) {
+//    if (address.empty()) return address;
+//    std::string port;
+//    if (address.find(':') == std::string::npos) return port;
+//
+//    port = splitString(address, ":").back();
+//    try {
+//        while (!port.empty() && (port.back() < '0' || port.back() > '9')) {
+//            port.pop_back();
+//        }
+//    } catch (const std::exception &e) {
+//        ERR_LOG(0, 0, "%s,解析端口异常:%s.", __FUNCTION__, e.what());
+//    }
+//    return port;
+//}
+//
+//std::string ZookeeperManager::parseDomain(const std::string &domain) {
+//    std::string hosts;
+//    if (domain.empty()) return hosts;
+//    boost::asio::io_service io_service;
+//    boost::asio::ip::tcp::resolver resolver(io_service);
+//
+//    std::string port = getPort(domain);
+//    boost::asio::ip::tcp::resolver::query query(getHost(domain), port);
+//
+//    boost::asio::ip::tcp::resolver::iterator iter = resolver.resolve(query);
+//    boost::asio::ip::tcp::resolver::iterator end; // End marker.
+//    while (iter != end) {
+//        boost::asio::ip::tcp::endpoint ep = *iter++;
+//        hosts += ep.address().to_string();
+//        hosts.push_back(':');
+//        hosts += port;
+//        hosts.push_back(',');
+//    }
+//    hosts.pop_back();
+//    INFO_LOG(0, 0, "%s,connect string: %s", __FUNCTION__, hosts.c_str());
+//    return hosts;
+//}
+//
+//bool ZookeeperManager::needToParse(const std::string &addr){
+//    /* 只解析形如 domain:port 的zk地址
+//     * 默认addr只有两种合法形式
+//     * 第一种: ip1:port[,ip2:port,ip3:port...]
+//     * 第二种: domain:port
+//     */
+//    return addr.find_first_of(',') == std::string::npos;
+//}
+
 void ZookeeperManager::DeleteWatcher(int type, const char *abs_path, void *p_zookeeper_context)
 {
     if (GetHandler() == NULL)
@@ -1714,6 +1915,7 @@ void ZookeeperManager::InnerWatcher(zhandle_t *zh, int type, int state,
             if ((it->second & WATCHER_GET_CHILDREN) == WATCHER_GET_CHILDREN)
             {
                 // 子节点事件
+                /// 但并没有将ScopedStringVector返回
                 ScopedStringVector children;
                 ret = manager.GetChildren(abs_path, children, 1);
                 stop_watcher_type_mask = ~WATCHER_GET_CHILDREN;

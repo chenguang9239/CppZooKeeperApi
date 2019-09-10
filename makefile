@@ -1,4 +1,6 @@
-include zookeeper.mk
+######include zookeeper.mk
+
+ZOOKEEPER_DIR="ext/zookeeper-3.4.12"
 
 #本项目相关变量
 ROOT_DIR = .
@@ -11,13 +13,14 @@ TARGET = libCppZooKeeper.so
 TARGETA = libCppZooKeeper.a
 
 #头文件包含目录，一行一个
-INC_DIR += -I${ZOOKEEPER_DIR}/src/c/include
-INC_DIR += -I${ZOOKEEPER_DIR}/src/c/generated
-INC_DIR += -I${ZOOKEEPER_DIR}/src/c/src
+#INC_DIR += -I${ZOOKEEPER_DIR}/src/c/include
+#INC_DIR += -I${ZOOKEEPER_DIR}/src/c/generated
+#INC_DIR += -I${ZOOKEEPER_DIR}/src/c/src
 
 #静态库文件路径
 #STATIC_LIBS_DIR = ${ROOT_DIR}/ext/libs
-#STATIC_LIBS = $(foreach n,$(STATIC_LIBS_DIR), $(wildcard $(n)/*.a)) 
+#STATIC_LIBS = $(foreach n,$(STATIC_LIBS_DIR), $(wildcard $(n)/*.a))
+STATIC_LIBS = ./lib/libzookeeper_mt.a ./lib/libzookeeper_st.a
 
 #其他库文件，一行一个
 #STATIC_LIBS += ${STATIC_LIBS_DIR}/libtinyxml.a
@@ -85,3 +88,6 @@ run:
 dep:
 	./make_dep.sh
 
+install:
+	cp *.h *.cpp /usr/local/CppZooKeeperApi/include/
+	cp *.a *.so /usr/local/CppZooKeeperApi/lib

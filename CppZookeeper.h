@@ -1,7 +1,7 @@
 #ifndef _CPP_ZOOKEEPER_H_
 #define _CPP_ZOOKEEPER_H_
 
-#include <zookeeper.h>
+#include "zookeeper/zookeeper.h"
 
 #include <string>
 #include <functional>
@@ -40,10 +40,25 @@ Zookeeper封装API实现功能：
     任何回调中，不能进行阻塞操作，否则会影响后面流程的回调
 */
 
-namespace zookeeper
+namespace CppZooKeeper
 {
 class ZookeeperManager;
 class ZookeeperCtx;
+
+enum CPP_ZOO_KEEPER_ERR_CODE{
+    ILLEGAL_PATH = 10203
+};
+
+enum CPP_ZOO_KEEPER_LOG_LEVEL{
+    DEBUG_LEVEL,
+    INFO_LEVEL,
+    WARN_LEVEL,
+    ERROR_LEVEL
+};
+
+void setCppZooKeeperLog(const std::string &path, CPP_ZOO_KEEPER_LOG_LEVEL level);
+
+void setZookeeperCAPILog(const std::string &path, ZooLogLevel level);
 
 class MultiOps
 {
@@ -194,7 +209,6 @@ struct EphemeralNodeInfo
 class ZookeeperManager
 {
 public:
-
     ZookeeperManager();
 
 #ifdef CPP_ZK_USE_BOOST
@@ -291,6 +305,14 @@ public:
     int32_t Create(const std::string &path, const char *value, int valuelen, std::string *p_real_path = NULL, const ACL_vector *acl = &ZOO_OPEN_ACL_UNSAFE, int flags = 0, bool ephemeral_exist_skip = false);
     int32_t Create(const std::string &path, const std::string &value, std::string *p_real_path = NULL, const ACL_vector *acl = &ZOO_OPEN_ACL_UNSAFE, int flags = 0, bool ephemeral_exist_skip = false);
 
+    int32_t CreateRecursively(
+            const std::string &path,
+            const std::string &value,
+            std::string *p_real_path = NULL,
+            const ACL_vector *acl = &ZOO_OPEN_ACL_UNSAFE,
+            int flags = 0,
+            bool ephemeral_exist_skip = false);
+
     int32_t ASet(const std::string &path, const char *buffer, int buflen, int version, std::shared_ptr<StatCompletionFunType> stat_completion_fun);
     int32_t ASet(const std::string &path, const std::string &buffer, int version, std::shared_ptr<StatCompletionFunType> stat_completion_fun);
     int32_t Set(const std::string &path, const char *buffer, int buflen, int version, Stat *stat = NULL);
@@ -359,6 +381,12 @@ public:
     int32_t GetCString(const std::string &path, std::string &data, Stat *stat = NULL, int watch = 0);
     int32_t GetCString(const std::string &path, std::string &data, Stat *stat, std::shared_ptr<WatcherFunType> watcher_fun);
 
+//    std::vector<std::string> splitString(const std::string &s, const std::string &with);
+//    std::string getHost(const std::string &address);
+//    std::string getPort(const std::string &address);
+//    std::string parseDomain(const std::string &domain);
+//    /* 只解析形如 domain:port 的zk地址 */
+//    bool needToParse(const std::string &addr);
 protected:
 
     zhandle_t *m_zhandle;
