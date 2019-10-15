@@ -1947,8 +1947,10 @@ bool ZookeeperManager::ResumeEphemeralNode() {
     bool isOk = true;
     int32_t ret = ZOK;
     // 重新注册所有的临时节点
+    LOG_SPCL << "start re-creating tmp node...";
     unique_lock<recursive_mutex> phemeral_node_info_lock(m_ephemeral_node_info_lock);
     for (auto it = m_ephemeral_node_info.begin(); it != m_ephemeral_node_info.end(); ++it) {
+        LOG_SPCL << "re-create tmp node, path[" << it->first << "], data[" << it->second.Data << "]";
         // 先尝试创建一下临时节点，如果失败提示节点不存在，表示父节点不存在，创建父节点后重试一次
         ret = Create(it->first.c_str(), it->second.Data.data(), NULL, &it->second.Acl, it->second.Flags);
         if (ret == ZNONODE) {
