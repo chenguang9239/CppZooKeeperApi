@@ -1,7 +1,5 @@
 ######include zookeeper.mk
 
-ZOOKEEPER_DIR="ext/zookeeper-3.4.12"
-
 #本项目相关变量
 ROOT_DIR = .
 
@@ -13,39 +11,39 @@ TARGET = libCppZooKeeper.so
 TARGETA = libCppZooKeeper.a
 
 #头文件包含目录，一行一个
-#INC_DIR += -I${ZOOKEEPER_DIR}/src/c/include
-#INC_DIR += -I${ZOOKEEPER_DIR}/src/c/generated
-#INC_DIR += -I${ZOOKEEPER_DIR}/src/c/src
+INC_DIR +=-I./zookeeper/include/
 
 #静态库文件路径
-#STATIC_LIBS_DIR = ${ROOT_DIR}/ext/libs
-#STATIC_LIBS = $(foreach n,$(STATIC_LIBS_DIR), $(wildcard $(n)/*.a))
-STATIC_LIBS = ./lib/libzookeeper_mt.a ./lib/libzookeeper_st.a
+STATIC_LIBS_DIR = ${ROOT_DIR}/zookeeper/lib
+STATIC_LIBS = $(foreach n,$(STATIC_LIBS_DIR), $(wildcard $(n)/libzookeeper_*.a))
 
 #其他库文件，一行一个
 #STATIC_LIBS += ${STATIC_LIBS_DIR}/libtinyxml.a
 
 #链接选项
-LDFLAGS = -lpthread
-LDFLAGS += -ldl
-LDFLAGS += -fPIC
-#LDFLAGS += -lrtmp
+#LDFLAGS = -lpthread
+#LDFLAGS += -ldl
+#LDFLAGS += -fPIC
+LDFLAGS = -fPIC
 LDFLAGS += -rdynamic
+#LDFLAGS += -lboost_system -lboost_log_setup -lboost_log -lboost_thread -lboost_date_time -lboost_serialization \
+#-lboost_regex -lboost_chrono -lpthread
 #LDFLAGS += -fprofile-arcs -ftest-coverage
-LDFLAGS += ${STATIC_LIBS}
+#LDFLAGS += ${STATIC_LIBS}
 #LDFLAGS += -pg
 
 #编译选项
-CFLAGS += -rdynamic -g -MMD -O2 -Wall -Wextra -fPIC
+CFLAGS += -rdynamic -g -MMD -O3 -Wall -Wextra -fPIC
 #CFLAGS += -std=gnu++11
 CFLAGS += -std=c++11
+CFLAGS += -DBOOST_LOG_DYN_LINK
 #CFLAGS += -pg
 #CFLAGS += -fprofile-arcs -ftest-coverage
 CFLAGS += $(INC_DIR)
 
 #自动搜寻，当前项目的目标文件
 #SUBDIR可以指定多个目录，指定的目录下的所有cpp文件会加入编译，比如 SUBDIR = . src
-SUBDIR = .
+SUBDIR = . boost-log
 CURR_SOURCES =$(foreach n,$(SUBDIR), $(wildcard $(n)/*.cpp)) 
 
 #其他外部依赖cpp文件在此处加上
@@ -91,3 +89,12 @@ dep:
 install:
 	cp *.h *.cpp /usr/local/CppZooKeeperApi/include/
 	cp *.a *.so /usr/local/CppZooKeeperApi/lib
+
+# mkdir zookeeper
+# cd ./zookeeper-3.4.12/src/c
+# ./configure --prefix=../../../zookeeper
+# make
+# make install
+# cp -r ./src/hashtable ../../../zookeeper
+# cp ./src/zk_adaptor.h ../../../zookeeper
+# cp ./src/zk_hashtable.h ../../../zookeeper
