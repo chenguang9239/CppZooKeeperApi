@@ -87,8 +87,15 @@ dep:
 	./make_dep.sh
 
 install:
-	cp *.h *.cpp /usr/local/CppZooKeeperApi/include/
-	cp *.a *.so /usr/local/CppZooKeeperApi/lib
+	rm -rf ./CppZooKeeperApiHeader
+	rm -rf ./CppZooKeeperApiLib
+	mkdir -p ./CppZooKeeperApiHeader/boost-log
+	cp *.h ./CppZooKeeperApiHeader/
+	cp ./boost-log/*.h ./CppZooKeeperApiHeader/boost-log/
+	cp -r ./zookeeper/include/zookeeper ./CppZooKeeperApiHeader/
+	mkdir -p ./CppZooKeeperApiLib/zookeeper
+	cp *.a *.so ./CppZooKeeperApiLib
+	cp -r ./zookeeper/lib ./CppZooKeeperApiLib/zookeeper
 
 # mkdir zookeeper
 # cd ./zookeeper-3.4.12/src/c

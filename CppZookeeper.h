@@ -59,6 +59,12 @@ Zookeeper封装API实现功能：
 //state=3 连接已建立状态 ZOO_CONNECTED_STATE
 //state= 999 无连接状态
 
+// add a new type
+// type=30203 resume事件
+
+// add a new state
+// state=20203 resume成功状态
+
 
 namespace CppZooKeeper {
 
@@ -66,9 +72,18 @@ class ZookeeperManager;
 
 class ZookeeperCtx;
 
+enum CPP_ZOO_KEEPER_EVENT {
+    RESUME_EVENT = 30203
+};
+
+enum CPP_ZOO_KEEPER_STATE {
+    RESUME_SUCC = 20203
+};
+
 enum CPP_ZOO_KEEPER_ERR_CODE {
     ILLEGAL_PATH = 10203,
-    NO_TYPE_IN_PATH = 10405
+    NO_TYPE_IN_PATH = 10405,
+    DEFAULT_TYPE_IN_PATH = 10607
 };
 
 enum CPP_ZOO_KEEPER_LOG_LEVEL {
@@ -93,8 +108,6 @@ public:
      */
     MultiOps(ZookeeperManager *p_zk_manager = NULL) : mp_zk_manager(p_zk_manager) {
     }
-
-    int32_t GetOp(uint32_t index, zoo_op *&op);
 
     // max_real_path_size：为0表示不获得创建的节点路径
     void AddCreateOp(const std::string &path, const char *value, int valuelen,
@@ -261,6 +274,16 @@ public:
      */
     int32_t Init(const std::string &hosts, const std::string &root_path = "/", const clientid_t *client_id = NULL);
 
+    void SetReconnectOptions(std::function<void()> userReconnectAlertNotifier,
+                             int userReconnectAlertCount = 3, int userReconnectMaxCount = INT_MAX);
+
+    void SetResumeOptions(std::function<void()> userResumeEphemeralNodeAlertNotifier,
+                          std::function<void()> userResumeCustomWatcherAlertNotifier = nullptr,
+                          std::function<void()> userResumeGlobalWatcherAlertNotifier = nullptr,
+                          int userResumeAlertCount = 3, int userResumeMaxCount = 5);
+
+    void SetCallWatcherFuncOnResume(bool flag);
+
     /** 连接，阻塞操作，直到连接成功或者超时，超时后，也许会连接成功，更加稳妥的做法是，重新连接
      *
      * @param   const std::string & hosts
@@ -373,7 +396,7 @@ public:
     int32_t ADelete(const std::string &path, int version,
                     std::shared_ptr<VoidCompletionFuncType> void_completion_fun);
 
-    int32_t Delete(const std::string &path, int version);
+    int32_t Delete(const std::string &path, int version = -1);
 
     // AGetAcl回调中acl和stat均无需调用方释放
     int32_t AGetAcl(const std::string &path, std::shared_ptr<AclCompletionFuncType> acl_completion_fun);
@@ -439,6 +462,13 @@ public:
     int32_t GetCString(const std::string &path, std::string &data,
                        Stat *stat, std::shared_ptr<WatcherFuncType> watcher_fun);
 
+
+    std::map<std::string, uint8_t> getGlobalWatcherPathType();
+
+    std::map<std::string, EphemeralNodeInfo> getEphemeralNodeInfo();
+
+    std::multimap<std::string, std::shared_ptr<ZookeeperCtx>> getCustomWatcherContexts();
+
 protected:
     zhandle_t *m_zhandle;
     std::string m_hosts;
@@ -460,17 +490,35 @@ protected:
     // 全局Watcher的context
     std::shared_ptr<ZookeeperCtx> m_global_watcher_context;
 
-    std::recursive_mutex m_custom_watcher_contexts_lock;
+    std::mutex m_custom_watcher_contexts_mutex;
     // <绝对路径,用户自定义Watcher的context>，用于断线重连注册Watcher
     std::multimap<std::string, std::shared_ptr<ZookeeperCtx>> m_custom_watcher_contexts;
 
-    std::recursive_mutex m_global_watcher_path_type_lock;
+    std::mutex m_global_watcher_path_type_mutex;
     // <全局Watcher的绝对路径,Watcher类型>，类型为GlobalWatcherType的值或结果，用于自动重注册Watcher和断线重连注册
     std::map<std::string, uint8_t> m_global_watcher_path_type;
 
-    std::recursive_mutex m_ephemeral_node_info_lock;
+    //std::recursive_mutex m_ephemeral_node_info_lock;
+    std::mutex m_ephemeral_node_info_lock;
+
     // <绝对路径,所有临时节点信息>
     std::map<std::string, EphemeralNodeInfo> m_ephemeral_node_info;
+
+    // user specified whether call watcher function on resume
+
+    bool callWatcherFuncOnResume;
+
+    // user specified retry max count and alert count
+    int reconnectMaxCount; // if <= 0 then reconnect until succeed
+    int resumeMaxCount;  // if <= 0, will use default value
+    int reconnectAlertCount; // if <= 0, will use default value
+    int resumeAlertCount; // if <= 0, will use default value
+
+    // user specified interface
+    std::function<void()> reconnectAlertNotifier;
+    std::function<void()> resumeGlobalWatcherAlertNotifier;
+    std::function<void()> resumeCustomWatcherAlertNotifier;
+    std::function<void()> resumeEphemeralNodeAlertNotifier;
 
     /* 内部函数，用于传递给Zookeeper API */
     // When global or custom watcher is triggered，InnerWatcherCbFunc will be called
@@ -479,13 +527,21 @@ protected:
     static void InnerWatcherCbFunc(zhandle_t *zh, int type, int state,
                                    const char *abs_path, void *p_zookeeper_context);
 
+    static void HandleSessionEvent(ZookeeperManager &manager, int state);
+
     static void TimeoutReconnect(ZookeeperManager &manager);
 
     static bool IsValidCallBack(std::shared_ptr<WatcherFuncType> func);
 
-    static bool IsValidContext(ZookeeperCtx *p_context);
+    static bool IsValidWatcherContext(ZookeeperCtx *p_context);
+
+    static void SetWatcherContextInvalid(ZookeeperCtx *p_context);
 
     static bool IsValidManager(zhandle_t *zh, ZookeeperManager &manager);
+
+    static bool IsValidEvent(ZookeeperCtx *p_context, const std::string &absPath, int type);
+
+    static uint32_t GetWatcherType(ZookeeperCtx *p_context, const std::string &absPath = "");
 
     static int CustomWatcherAutoRegisterer(ZookeeperCtx *p_context, const char *abs_path, int type);
 
@@ -513,12 +569,16 @@ protected:
 
     static void InnerMultiCompletion(int rc, const void *p_zookeeper_context);
 
+    static std::string ZError(int err);
+
+    static std::string CharPtrToString(const char *p);
+
     void AddCustomWatcher(const std::string &abs_path, std::shared_ptr<ZookeeperCtx> watcher_context);
 
-    std::shared_ptr<ZookeeperCtx> GetCustomWatcher(const std::string &path, int type,
-                                                   const std::shared_ptr<WatcherFuncType> &watcher_fun);
+    std::shared_ptr<ZookeeperCtx> GetCustomWatcherCtx(const std::string &path, int type,
+                                                      const std::shared_ptr<WatcherFuncType> &watcher_fun);
 
-    void DelCustomWatcher(const std::string &abs_path, const ZookeeperCtx *watcher_context);
+    void DelCustomWatcherCtx(const std::string &abs_path, const ZookeeperCtx *watcher_context);
 
     bool ResumeEnv();
 

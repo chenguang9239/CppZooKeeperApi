@@ -15,6 +15,7 @@
 namespace CppZooKeeper {
 
 BOOST_LOG_ATTRIBUTE_KEYWORD(severity, "Severity", logger::LEVEL)
+BOOST_LOG_ATTRIBUTE_KEYWORD(channel, "Channel", std::string)
 
 boost::shared_ptr<logger::basic_sink_t> logger::init() {
     auto ptr = boost::log::add_console_log(
@@ -80,7 +81,7 @@ std::string logger::innerPutTime(struct tm *t) {
             res += padTime(std::to_string(t->tm_sec));
         }
     } catch (const std::exception &e) {
-        LOG_ERROR << "innerPutTime exception: " << e.what();
+        M_LOG_ERROR << "innerPutTime exception: " << e.what();
         res.clear();
     }
     return res;
@@ -94,7 +95,7 @@ std::string logger::padTime(const std::string &time) {
             return res;
         } else { return time; }
     } catch (const std::exception &e) {
-        LOG_ERROR << "pad time exception: " << e.what();
+        M_LOG_ERROR << "pad time exception: " << e.what();
         return time;
     }
 }
@@ -106,7 +107,7 @@ std::string logger::TimeStampToLocalTime(uint64_t timestamp) {
 }
 
 void logger::initLogger(const std::string &logPath, const std::string &logName,
-                        enum LEVEL level, unsigned int userFlushPeriod) {
+                        enum LEVEL level, unsigned int userFlushPeriod, const std::string &channelString) {
     stopDefaultLogging();
     flushPeriod = userFlushPeriod;
     std::string tmpLogPath = logPath, tmpLogName = logName;
@@ -127,6 +128,7 @@ void logger::initLogger(const std::string &logPath, const std::string &logName,
             // auto_flush can put log to file immediately, but bad to efficiency
 //            boost::log::keywords::auto_flush = true,
             boost::log::keywords::file_name = ss.str(),
+//            boost::log::keywords::filter = channel == channelString,
             boost::log::keywords::rotation_size = 1024 * 1024 * 1024, /*< rotate files every 1 GB... >*/
             boost::log::keywords::time_based_rotation = boost::log::sinks::file::rotation_at_time_point(0, 0, 0),
             boost::log::keywords::format = (boost::log::expressions::stream
@@ -136,48 +138,59 @@ void logger::initLogger(const std::string &logPath, const std::string &logName,
                     << "[" << severity << "]" << boost::log::expressions::smessage));
     boost::log::add_common_attributes();
 
+    if (channelString != "Z") {
+        lg = boost::log::sources::severity_channel_logger<LEVEL, std::string>(
+                boost::log::keywords::channel = channelString);
+    }
+
     switch (level) {
         case L_DEBUG: {
-            LOG_SPCL_IMM("set boost log level: DEBUG_LEVEL");
-            boost::log::core::get()->set_filter(severity >= L_DEBUG);
+            M_LOG_SPCL_IMM("set boost log level: DEBUG_LEVEL");
+//            boost::log::core::get()->set_filter(severity >= L_DEBUG);
+            fileSinkPtr->set_filter(channel == channelString && severity >= L_DEBUG);
             debug = true;
             break;
         }
         case L_INFO: {
-            LOG_SPCL_IMM("set boost log level: INFO_LEVEL");
-            boost::log::core::get()->set_filter(severity >= L_INFO);
+            M_LOG_SPCL_IMM("set boost log level: INFO_LEVEL");
+//            boost::log::core::get()->set_filter(severity >= L_INFO);
+            fileSinkPtr->set_filter(channel == channelString && severity >= L_INFO);
             break;
         }
         case L_WARN: {
-            LOG_SPCL_IMM("set boost log level: WARN_LEVEL");
-            boost::log::core::get()->set_filter(severity >= L_WARN);
+            M_LOG_SPCL_IMM("set boost log level: WARN_LEVEL");
+//            boost::log::core::get()->set_filter(severity >= L_WARN);
+            fileSinkPtr->set_filter(channel == channelString && severity >= L_WARN);
             info = false;
             break;
         }
         case L_ERROR: {
-            LOG_SPCL_IMM("set boost log level: ERROR_LEVEL");
-            boost::log::core::get()->set_filter(severity >= L_ERROR);
+            M_LOG_SPCL_IMM("set boost log level: ERROR_LEVEL");
+//            boost::log::core::get()->set_filter(severity >= L_ERROR);
+            fileSinkPtr->set_filter(channel == channelString && severity >= L_ERROR);
             info = warn = false;
             break;
         }
         case L_FATAL: {
-            LOG_SPCL_IMM("set boost log level: FATAL_LEVEL");
-            boost::log::core::get()->set_filter(severity >= L_FATAL);
+            M_LOG_SPCL_IMM("set boost log level: FATAL_LEVEL");
+//            boost::log::core::get()->set_filter(severity >= L_FATAL);
+            fileSinkPtr->set_filter(channel == channelString && severity >= L_FATAL);
             info = warn = error = false;
             break;
         }
         default: {
-            LOG_SPCL_IMM("level " + std::to_string((int) level) + " not exist, set boost log level FATAL_LEVEL");
-            boost::log::core::get()->set_filter(severity >= L_FATAL);
+            M_LOG_SPCL_IMM("level " + std::to_string((int) level) + " not exist, set boost log level FATAL_LEVEL");
+//            boost::log::core::get()->set_filter(severity >= L_FATAL);
+            fileSinkPtr->set_filter(channel == channelString && severity >= L_FATAL);
             info = warn = error = false;
             break;
         }
     }
 
-    LOG_SPCL_IMM("init logger ok, file path: " + ss.str());
+    M_LOG_SPCL_IMM("init logger ok, file path: " + ss.str() + ", set log channel: " + channelString);
 
     if (flushPeriod > 0) {
-        LOG_SPCL_IMM("auto flush period: " + std::to_string(flushPeriod) + "s");
+        M_LOG_SPCL_IMM("auto flush period: " + std::to_string(flushPeriod) + "s");
         running = true;
         autoFlushThread = std::thread(&logger::autoFlush, this);
     }
@@ -189,13 +202,14 @@ void logger::stopAutoFlush() {
         if (autoFlushThread.joinable()) {
             autoFlushThread.join();
         } else {
-            LOG_ERROR_IMM("autoFlushThread not joinable!");
+            M_LOG_ERROR_IMM("autoFlushThread not joinable!");
         }
     }
 }
 
 logger::logger() : debug(false), info(true), warn(true), error(true), fatal(true),
-                   defaultSinkPtr(init()), running(false), flushPeriod(0) {
+                   defaultSinkPtr(init()), lg(boost::log::keywords::channel = "Z"),
+                   running(false), flushPeriod(0) {
 }
 
 logger::~logger() {
