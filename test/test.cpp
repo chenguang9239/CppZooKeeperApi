@@ -1,26 +1,22 @@
-//
-// Created by admin on 2019-09-16.
-//
-
-#include "CppZooKeeper.h"
+#include "zookeeper_manager.h"
 #include <iostream>
 #include <unistd.h>
 #include <sys/syscall.h>
 
-using CppZooKeeper::logger;
+using zookeeper::logger;
 
-bool getChildrenWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, const char *path);
+bool getChildrenWatcherFunc(zookeeper::ZookeeperManager &zk_client, int type, int state, const char *path);
 
-bool getWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, const char *path);
+bool getWatcherFunc(zookeeper::ZookeeperManager &zk_client, int type, int state, const char *path);
 
-bool existWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, const char *path);
+bool existWatcherFunc(zookeeper::ZookeeperManager &zk_client, int type, int state, const char *path);
 
-std::string getNodeValue(CppZooKeeper::ZookeeperManager &zkClient, const std::string &path) {
+std::string getNodeValue(zookeeper::ZookeeperManager &zk_client, const std::string &path) {
     char *buffer = nullptr;
     Stat stat;
     int buf_len = 0;
 
-    int ret = zkClient.Get(path, nullptr, &buf_len, &stat);
+    int ret = zk_client.Get(path, nullptr, &buf_len, &stat);
     if (ret != ZOK || stat.dataLength <= 0) {
 //        M_LOG_ERROR << "ret: " << ret << ", dataLength: " << stat.dataLength;
         return "";
@@ -29,7 +25,7 @@ std::string getNodeValue(CppZooKeeper::ZookeeperManager &zkClient, const std::st
     buffer = (char *) malloc(sizeof(char) * (stat.dataLength + 1));
     buf_len = stat.dataLength + 1;
 
-    ret = zkClient.Get(path, buffer, &buf_len, &stat);
+    ret = zk_client.Get(path, buffer, &buf_len, &stat);
     if (ret != ZOK || buf_len <= 0) {
 //        M_LOG_ERROR << "ret: " << ret << ", buf_len: " << buf_len;
         if (buffer != nullptr) {
@@ -50,65 +46,65 @@ std::string getNodeValue(CppZooKeeper::ZookeeperManager &zkClient, const std::st
     return return_str;
 }
 
-void printChildChangeEvent(CppZooKeeper::ZookeeperManager &zkClient) {
+void printChildChangeEvent(zookeeper::ZookeeperManager &zk_client) {
     M_LOG_SPCL << "child change, but user will not register again";
 }
 
-void printChildList(CppZooKeeper::ZookeeperManager &zkClient) {
+void printChildList(zookeeper::ZookeeperManager &zk_client) {
     std::string path("/test_CPPZKAPI/tree3");
-    auto watcherFuncPtr = std::make_shared<CppZooKeeper::WatcherFuncType>(std::bind(&getChildrenWatcherFunc,
+    auto watcherFuncPtr = std::make_shared<zookeeper::WatcherFuncType>(std::bind(&getChildrenWatcherFunc,
                                                                                     std::placeholders::_1,
                                                                                     std::placeholders::_2,
                                                                                     std::placeholders::_3,
                                                                                     std::placeholders::_4));
-    CppZooKeeper::ScopedStringVector strings;
-    zkClient.GetChildren(path, strings, watcherFuncPtr);
+    zookeeper::ScopedStringVector strings;
+    zk_client.GetChildren(path, strings, watcherFuncPtr);
     if (strings.count == 0) M_LOG_SPCL << "no node in path: " << path;
     for (auto i = 0; i < strings.count; ++i) {
-        std::string tmpValue = getNodeValue(zkClient, path + "/" + strings.data[i]);
+        std::string tmpValue = getNodeValue(zk_client, path + "/" + strings.data[i]);
         M_LOG_SPCL << "node path: " << strings.data[i] << ", node node value: " << tmpValue;
     }
 }
 
-void printDataChangeEvent(CppZooKeeper::ZookeeperManager &zkClient) {
+void printDataChangeEvent(zookeeper::ZookeeperManager &zk_client) {
     M_LOG_SPCL << "data change, but user will not register again";
 }
 
-void printData(CppZooKeeper::ZookeeperManager &zkClient) {
+void printData(zookeeper::ZookeeperManager &zk_client) {
     std::string path("/test_CPPZKAPI/tree2/t1");
-    auto watcherFuncPtr = std::make_shared<CppZooKeeper::WatcherFuncType>(std::bind(&getWatcherFunc,
+    auto watcherFuncPtr = std::make_shared<zookeeper::WatcherFuncType>(std::bind(&getWatcherFunc,
                                                                                     std::placeholders::_1,
                                                                                     std::placeholders::_2,
                                                                                     std::placeholders::_3,
                                                                                     std::placeholders::_4));
     char buf[1024];
-    int buflen = 1024;
-    zkClient.Get(path.c_str(), buf, &buflen, NULL, watcherFuncPtr);
+    int buf_len = 1024;
+    zk_client.Get(path.c_str(), buf, &buf_len, NULL, watcherFuncPtr);
     M_LOG_SPCL << "node path: " << path << ", data: " << buf;
 }
 
-void printNodeExistEvent(CppZooKeeper::ZookeeperManager &zkClient) {
+void printNodeExistEvent(zookeeper::ZookeeperManager &zk_client) {
     M_LOG_SPCL << "node exist change, but user will not register again";
 }
 
-void printNodeExist(CppZooKeeper::ZookeeperManager &zkClient) {
+void printNodeExist(zookeeper::ZookeeperManager &zk_client) {
     std::string path("/test_CPPZKAPI/tree1/t1");
-    auto watcherFuncPtr = std::make_shared<CppZooKeeper::WatcherFuncType>(std::bind(&existWatcherFunc,
+    auto watcherFuncPtr = std::make_shared<zookeeper::WatcherFuncType>(std::bind(&existWatcherFunc,
                                                                                     std::placeholders::_1,
                                                                                     std::placeholders::_2,
                                                                                     std::placeholders::_3,
                                                                                     std::placeholders::_4));
-    auto ret = zkClient.Exists(path.c_str(), NULL, watcherFuncPtr);
+    auto ret = zk_client.Exists(path.c_str(), NULL, watcherFuncPtr);
     M_LOG_SPCL << "node path: " << path << ", exist? : " << ret;
 }
 
-bool globalWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, const char *path) {
+bool globalWatcherFunc(zookeeper::ZookeeperManager &zk_client, int type, int state, const char *path) {
     if (type == ZOO_SESSION_EVENT) {
         if (state == ZOO_CONNECTED_STATE) { // 第一次连接成功与超时之后的重连成功，会触发ZOO_CONNECTED_STATE
             // 不超时的重连成功也会触发会触发ZOO_CONNECTED_STATE,此时needToInitValueList为false
             std::cout << "连接成功事件！！！" << std::endl;
             M_LOG_SPCL << "连接成功事件！！";
-//            printChildList(zkCli);
+//            printChildList(zk_client);
         } else if (state == ZOO_EXPIRED_SESSION_STATE) { // 超时会触发ZOO_EXPIRED_SESSION_STATE
             std::cout << "连接超时事件！！！" << std::endl;
             M_LOG_SPCL << "连接超时事件！!";
@@ -127,9 +123,9 @@ bool globalWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int stat
 //    return false;
 }
 
-bool getChildrenWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, const char *path) {
+bool getChildrenWatcherFunc(zookeeper::ZookeeperManager &zk_client, int type, int state, const char *path) {
     M_LOG_SPCL << "type: " << type << ", state: " << state << ", path: " << std::string(path);
-    if ((type == CppZooKeeper::RESUME_EVENT && state == CppZooKeeper::RESUME_SUCC) ||
+    if ((type == zookeeper::RESUME_EVENT && state == zookeeper::RESUME_SUCC) ||
         type == 1 || type == 2 || type == 4) {
 
         // 判断是否为固定一个线程在处理event
@@ -138,11 +134,11 @@ bool getChildrenWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int
 //        M_LOG_SPCL << "now sleep 60s";
 //        sleep(60);
 
-        if (type == CppZooKeeper::RESUME_EVENT && state == CppZooKeeper::RESUME_SUCC) {
+        if (type == zookeeper::RESUME_EVENT && state == zookeeper::RESUME_SUCC) {
             M_LOG_WARN << "resume environment success, so user watcher func is calling now";
         }
-//        printChildList(zkCli);
-        printChildChangeEvent(zkCli);
+//        printChildList(zk_client);
+        printChildChangeEvent(zk_client);
     } else if (type == -1) {
         M_LOG_ERROR << "custom watcher should not triggered by ZOO_SESSION_EVENT";
     } else if (type == 3) {
@@ -163,13 +159,13 @@ bool getChildrenWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int
 //    return false;
 }
 
-bool getWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, const char *path) {
+bool getWatcherFunc(zookeeper::ZookeeperManager &zk_client, int type, int state, const char *path) {
     M_LOG_SPCL << "type: " << type << ", state: " << state << ", path: " << std::string(path);
     if (type == 4) {
 
     } else if (type == -1) {
         M_LOG_ERROR << "custom watcher should not triggered by ZOO_SESSION_EVENT";
-    } else if ((type == CppZooKeeper::RESUME_EVENT && state == CppZooKeeper::RESUME_SUCC) ||
+    } else if ((type == zookeeper::RESUME_EVENT && state == zookeeper::RESUME_SUCC) ||
                type == 1 || type == 2 || type == 3) { // node created, node deleted, node data changed
 
         // 判断是否为固定一个线程在处理event
@@ -178,11 +174,11 @@ bool getWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, 
 //        M_LOG_SPCL << "now sleep 60s";
 //        sleep(60);
 
-        if (type == CppZooKeeper::RESUME_EVENT && state == CppZooKeeper::RESUME_SUCC) {
+        if (type == zookeeper::RESUME_EVENT && state == zookeeper::RESUME_SUCC) {
             M_LOG_WARN << "resume environment success, so user watcher func is calling now";
         }
-        printDataChangeEvent(zkCli);
-//        printData(zkCli);
+        printDataChangeEvent(zk_client);
+//        printData(zk_client);
     } else if (type == -2) {
 
     }
@@ -199,13 +195,13 @@ bool getWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, 
 //    return false;
 }
 
-bool existWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state, const char *path) {
+bool existWatcherFunc(zookeeper::ZookeeperManager &zk_client, int type, int state, const char *path) {
     M_LOG_SPCL << "type: " << type << ", state: " << state << ", path: " << std::string(path);
     if (type == 4) {
 
     } else if (type == -1) {
         M_LOG_ERROR << "custom watcher should not triggered by ZOO_SESSION_EVENT";
-    } else if ((type == CppZooKeeper::RESUME_EVENT && state == CppZooKeeper::RESUME_SUCC) ||
+    } else if ((type == zookeeper::RESUME_EVENT && state == zookeeper::RESUME_SUCC) ||
                type == 1 || type == 2 || type == 3) {
 
         // 判断是否为固定一个线程在处理event
@@ -214,11 +210,11 @@ bool existWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state
 //        M_LOG_SPCL << "now sleep 60s";
 //        sleep(60);
 
-        if (type == CppZooKeeper::RESUME_EVENT && state == CppZooKeeper::RESUME_SUCC) {
+        if (type == zookeeper::RESUME_EVENT && state == zookeeper::RESUME_SUCC) {
             M_LOG_WARN << "resume environment success, so user watcher func is calling now";
         }
-        printNodeExistEvent(zkCli);
-//        printNodeExist(zkCli);
+        printNodeExistEvent(zk_client);
+//        printNodeExist(zk_client);
     } else if (type == -2) {
 
     }
@@ -235,19 +231,19 @@ bool existWatcherFunc(CppZooKeeper::ZookeeperManager &zkCli, int type, int state
 //    return false;
 }
 
-void InnerGetChirldren(CppZooKeeper::ZookeeperManager &zkClient) {
+void InnerGetChirldren(zookeeper::ZookeeperManager &zk_client) {
     M_LOG_SPCL << "InnerGetChirldren";
-    printChildList(zkClient);
+    printChildList(zk_client);
 }
 
-void InnerGet(CppZooKeeper::ZookeeperManager &zkClient) {
+void InnerGet(zookeeper::ZookeeperManager &zk_client) {
     M_LOG_SPCL << "InnerGet";
-    printData(zkClient);
+    printData(zk_client);
 }
 
-void InnerExist(CppZooKeeper::ZookeeperManager &zkClient) {
+void InnerExist(zookeeper::ZookeeperManager &zk_client) {
     M_LOG_SPCL << "InnerExist";
-    printNodeExist(zkClient);
+    printNodeExist(zk_client);
 }
 
 void reconnectNotifier() {
@@ -267,30 +263,28 @@ void resumeTmpNodeNotifier() {
 }
 
 int main() {
-    auto globalWatherPtr = std::make_shared<CppZooKeeper::WatcherFuncType>(std::bind(globalWatcherFunc,
+    auto globalWatherPtr = std::make_shared<zookeeper::WatcherFuncType>(std::bind(globalWatcherFunc,
                                                                                      std::placeholders::_1,
                                                                                      std::placeholders::_2,
                                                                                      std::placeholders::_3,
                                                                                      std::placeholders::_4));
-    CppZooKeeper::ZookeeperManager zkClient;
+    zookeeper::ZookeeperManager zk_client;
 
     std::string zkAddr = "10.126.11.26:2181,10.136.132.13:2181,10.126.127.23:2181";
 //    std::string zkAddr = "10.126.174.16:2181,10.126.174.11:2181,10.126.173.4:2181";
 
-    CppZooKeeper::InitCPPAPILogger("./logs", "ZKCPPAPI", logger::L_DEBUG, 5);
+    zookeeper::InitLogger("./logs", "zk_cpp_api", logger::L_DEBUG, 5);
 
-    CppZooKeeper::InitCAPILogger("./logs/ZKCAPI.log", ZOO_LOG_LEVEL_DEBUG);
-
-    zkClient.Init(zkAddr);
+    zk_client.Init(zkAddr);
 
     // 测试重连以及恢复机制
-    zkClient.SetReconnectOptions(reconnectNotifier, 1);
-    zkClient.SetResumeOptions(resumeTmpNodeNotifier, resumeCustomWatcherNotifier, resumeGlobalWatcherNotifier, 1);
-    zkClient.SetCallWatcherFuncOnResume(true);
+    zk_client.SetReconnectOptions(reconnectNotifier, 1);
+    zk_client.SetResumeOptions(resumeTmpNodeNotifier, resumeCustomWatcherNotifier, resumeGlobalWatcherNotifier, 1);
+    zk_client.SetCallWatcherFuncOnResume(true);
 
     int i = 0;
     while (++i <= 3) {
-        if (ZOK == zkClient.Connect(globalWatherPtr, 3000, 3000)) {
+        if (ZOK == zk_client.Connect(globalWatherPtr, 3000, 3000)) {
             break;
         } else {
             M_LOG_ERROR << "connect to zk server error, time(s): " << i
@@ -307,44 +301,44 @@ int main() {
     {
         std::string returnedPath;
         returnedPath.resize(1024);
-        zkClient.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:1234", "empty value", &returnedPath,
+        zk_client.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:1234", "empty value", &returnedPath,
                                    &ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL);
 
-        zkClient.DeletePathRecursion("/test_CPPZKAPI/tree/10.136.132.13:1234");
-        zkClient.DeletePathRecursion("/test_CPPZKAPI/tree/10.136.132.13:1234");
+        zk_client.DeletePathRecursion("/test_CPPZKAPI/tree/10.136.132.13:1234");
+        zk_client.DeletePathRecursion("/test_CPPZKAPI/tree/10.136.132.13:1234");
     }
 
     {
         std::string returnedPath;
         returnedPath.resize(1024);
-        zkClient.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:5678", "empty value", &returnedPath,
+        zk_client.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:5678", "empty value", &returnedPath,
                                    &ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL);
 
-        zkClient.Delete("/test_CPPZKAPI/tree/10.136.132.13:5678");
-        zkClient.Delete("/test_CPPZKAPI/tree/10.136.132.13:5678");
-        zkClient.Delete("/test_CPPZKAPI/tree2");
+        zk_client.Delete("/test_CPPZKAPI/tree/10.136.132.13:5678");
+        zk_client.Delete("/test_CPPZKAPI/tree/10.136.132.13:5678");
+        zk_client.Delete("/test_CPPZKAPI/tree2");
     }
 
     {
         std::string returnedPath;
         returnedPath.resize(1024);
-        zkClient.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:123", "empty value", &returnedPath,
+        zk_client.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:123", "empty value", &returnedPath,
                                    &ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL);
-        zkClient.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:234", "empty value", &returnedPath,
+        zk_client.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:234", "empty value", &returnedPath,
                                    &ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL);
-        zkClient.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:345", "empty value", &returnedPath,
+        zk_client.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:345", "empty value", &returnedPath,
                                    &ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL);
-        zkClient.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:456", "empty value", &returnedPath,
+        zk_client.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:456", "empty value", &returnedPath,
                                    &ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL);
 
-        zkClient.DeletePathRecursion("/test_CPPZKAPI/tree");
-        zkClient.DeletePathRecursion("/test_CPPZKAPI/tree");
+        zk_client.DeletePathRecursion("/test_CPPZKAPI/tree");
+        zk_client.DeletePathRecursion("/test_CPPZKAPI/tree");
     }
 
     {
         std::string returnedPath;
         returnedPath.resize(1024);
-        zkClient.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:1234567", "empty value", &returnedPath,
+        zk_client.CreateRecursively("/test_CPPZKAPI/tree/10.136.132.13:1234567", "empty value", &returnedPath,
                                    &ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL);
         if (returnedPath.find("/test_CPPZKAPI/tree/10.136.132.13:1234567") == 0) {
             M_LOG_SPCL << "create node success";
@@ -354,19 +348,19 @@ int main() {
     M_LOG_SPCL << "current thread id is: " << syscall(__NR_gettid);
 
     // 测试自动重注册，custom watcher
-    InnerGetChirldren(zkClient);
-    InnerGet(zkClient);
-    InnerExist(zkClient);
+    InnerGetChirldren(zk_client);
+    InnerGet(zk_client);
+    InnerExist(zk_client);
 
     // 测试自动重注册，global watcher
 //    ScopedStringVector children;
-//    zkClient.GetChildren("/test_CPPZKAPI/tree3", children, 1);
+//    zk_client.GetChildren("/test_CPPZKAPI/tree3", children, 1);
 //
 //    char buf[1024];
-//    int buflen = sizeof(buf);
-//    ret = zkClient.Get("/test_CPPZKAPI/tree2/t1", &buf, &buflen, NULL, 1);
+//    int buf_len = sizeof(buf);
+//    ret = zk_client.Get("/test_CPPZKAPI/tree2/t1", &buf, &buf_len, NULL, 1);
 //
-//    zkClient.Exists("/test_CPPZKAPI/tree1/t1", NULL, 1);
+//    zk_client.Exists("/test_CPPZKAPI/tree1/t1", NULL, 1);
 
     while (true) {
         usleep(5000);
@@ -375,9 +369,9 @@ int main() {
         int a;
         std::cin >> a;
         if (a == 1) {
-            InnerGetChirldren(zkClient);
-            InnerGet(zkClient);
-            InnerExist(zkClient);
+            InnerGetChirldren(zk_client);
+            InnerGet(zk_client);
+            InnerExist(zk_client);
         }
     }
 

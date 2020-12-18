@@ -1,4 +1,4 @@
-BOOSTLIB = /usr/local/boost_1_68_0_lib
+BOOSTLIB = /usr/local/lib/boost_1_68_0_lib
 ZKCPPCLIENTLIB = ../
 ZKCCLIENTLIB = ../zookeeper/lib
 
@@ -9,6 +9,7 @@ POS=-L$(BOOSTLIB) -L$(ZKCPPCLIENTLIB) -L$(ZKCCLIENTLIB)
 LIBS=-lboost_system -lboost_log_setup -lboost_log -lboost_thread -lboost_date_time -lboost_serialization \
 -lboost_regex -lboost_chrono -lpthread \
 -lCppZooKeeper
+
 #-lzookeeper_mt -lzookeeper_st
 
 CXXFLAGS += -I../
