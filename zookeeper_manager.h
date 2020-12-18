@@ -15,65 +15,16 @@
 #include "boost-log/log.h"
 #include "zookeeper/zookeeper.h"
 
-/*
-Zookeeper封装API实现功能：
-    Watcher
-        Watcher自动重注册，提供取消重注册的接口，Watcher触发后可以通过自定义Watcher决定是否再次注册Watcher
-        TODO：Watcher触发，会将数据自动带回来（重注册需要调用原始API）
-        Watcher回调支持函数对象
-    函数优化
-        支持函数对象回调
-        封装常用操作函数，优化接口参数，减少函数量
-    内存优化
-        使用shared_ptr进行内存管理，避免内存泄露
-        封装内部数据结构，自动释放
-    其他优化
-        支持XML配置文件方式初始化
-        支持相对路径（内部实现全部使用绝对路径，不使用ZooKeeper C
-api的相对路径功能）
-        支持一些额外功能函数，如递归创建节点，获得所有子节点的节点名称和路径等
-        支持Session超时自动，重连时自动注册Watcher，创建临时节点
-        支持使用Client ID重连在Session没超时时重连
-
-未实现的非功能可以通过GetHandler()获得原始API句柄调用
-
-使用注意事项：
-    重连时，可能会出现本地状态和Zookeeper状态不一致的情况，比如少接了一个Watcher？
-    为了保险起见，最好全部重新初始化状态，重新注册相应的Watcher。这个使用者维护。
-    非线程安全，一个实例只能用于一个线程，除非用户自己加锁保护
-    任何回调中，不能进行阻塞操作，否则会影响后面流程的回调
-*/
-
-// watcher事件类型（type）
-// ZOO_CREATED_EVENT(value=1)：节点创建事件，需要watch一个不存在的节点，当节点被创建时触发，此watch通过zoo_exists()设置
-// ZOO_DELETED_EVENT(value=2)：节点删除事件，此watch通过zoo_exists()或zoo_get()设置
-// ZOO_CHANGED_EVENT(value=3)：节点数据改变事件，此watch通过zoo_exists()或zoo_get()设置
-// ZOO_CHILD_EVENT(value=4)：子节点列表改变事件，此watch通过zoo_get_children()或zoo_get_children2()设置
-// ZOO_SESSION_EVENT(value=-1)：会话事件，客户端与服务端断开或重连时触发
-// ZOO_NOTWATCHING_EVENT(value=-2)：watch移除事件，服务端出于某些原因不再为客户端watch节点时触发
-//
-// watcher事件状态（state）
-// state=-112 会话超时状态 ZOO_EXPIRED_SESSION_STATE
-// state= -113　认证失败状态 ZOO_AUTH_FAILED_STATE
-// state= 1 连接建立中 ZOO_CONNECTING_STATE
-// state= 2 (暂时不清楚如何理解这个状态,ZOO_ASSOCIATING_STATE)
-// state=3 连接已建立状态 ZOO_CONNECTED_STATE
-// state= 999 无连接状态
-
-// add a new type
-// type=30203 resume事件
-
-// add a new state
-// state=20203 resume成功状态
-
 namespace zookeeper {
 
 class ZookeeperManager;
 
 class ZookeeperCtx;
 
+// resume event
 enum CPP_ZOO_KEEPER_EVENT { RESUME_EVENT = 30203 };
 
+// resume success state
 enum CPP_ZOO_KEEPER_STATE { RESUME_SUCC = 20203 };
 
 enum CPP_ZOO_KEEPER_ERR_CODE {
@@ -94,17 +45,9 @@ void InitLogger(const std::string &path, const std::string &name,
 
 class MultiOps {
  public:
-  /** 构造函数
-   *
-   * @param   ZookeeprerManager * zk_manager
-   * 填入multi_zk_manager可以使用相对路径，为NULL时不能使用相对路径
-   * @retval
-   * @author  moon
-   */
   MultiOps(ZookeeperManager *zk_manager = NULL)
       : multi_zk_manager(zk_manager) {}
 
-  // max_real_path_size：为0表示不获得创建的节点路径
   void AddCreateOp(const std::string &path, const char *value, int value_len,
                    const ACL_vector *acl = &ZOO_OPEN_ACL_UNSAFE, int flags = 0,
                    uint32_t max_real_path_size = 128);
@@ -115,14 +58,12 @@ class MultiOps {
 
   void AddDeleteOp(const std::string &path, int version);
 
-  // need_stat：是否获得stat信息
   void AddSetOp(const std::string &path, const char *buffer, int buf_len,
                 int version, bool need_stat = false);
 
   void AddSetOp(const std::string &path, const std::string &buffer, int version,
                 bool need_stat = false);
 
-  // 检查节点是否存在，并且是否符合version，当version为-1时不考虑version是否匹配
   void AddCheckOp(const std::string &path, int version);
 
   uint32_t Size() { return m_multi_ops.size(); }
@@ -132,18 +73,16 @@ class MultiOps {
   std::vector<zoo_op> m_multi_ops;
 
  protected:
-  // 保存内部产生的一些需要保存的空间，结构销毁后，自动释放内存
   std::list<std::shared_ptr<std::string>> m_inner_strings;
   ZookeeperManager *multi_zk_manager;
 };
 
-// 值和Stat
 struct ValueStat {
   std::string value;
   Stat stat;
 };
 
-// WatcherFunType的返回值表示是否停止此Watcher，如果停止(返回true)，则不再重注册
+// stop to watch when return true
 typedef std::function<bool(ZookeeperManager &zookeeper_manager, int type,
                            int state, const char *path)>
     WatcherFuncType;
@@ -231,11 +170,8 @@ class ScopedAclVector : public ACL_vector {
 
  private:
   ScopedAclVector(ScopedAclVector &&right) = delete;
-
   ScopedAclVector(const ScopedAclVector &right) = delete;
-
   ScopedAclVector &operator=(ScopedAclVector &&right) = delete;
-
   ScopedAclVector &operator=(const ScopedAclVector &right) = delete;
 };
 
@@ -248,39 +184,12 @@ struct EphemeralNodeInfo {
 class ZookeeperManager {
  public:
   std::atomic<bool> reconnecting_;
-
-  // int32_t m_errno;        // 暂时没想好要不要用这个，先不要用吧
-  // 是否在析构的时候不主动关闭连接，特殊配置，一般情况保持false，不要使用，只用于在重启时不希望删除临时节点时使用
   bool m_dont_close_;
 
   ZookeeperManager();
 
   virtual ~ZookeeperManager();
 
-#ifdef CPP_ZK_USE_BOOST
-  /** 从配置文件中读取配置，配置文件内容为xml：
-  <?xml version="1.0" encoding="UTF-8" ?>
-  <ZkConf>
-      <Root>/QQ_IOS</Root>
-      <Hosts>192.168.174.128:2181</Hosts>
-  </ZkConf>
-   *
-   * @param   const std::string & config_file_path
-   * @retval  int32_t
-   * @author  moon
-   */
-  int32_t InitFromFile(const std::string &config_file_path,
-                       const clientid_t *client_id = NULL);
-#endif
-
-  /**
-   *
-   * @param   const std::string & hosts       格式：ip:port,ip:port
-   * @param   const std::string & root_path
-   * 根节点必须为有效路径，为了支持路径填写相对或者绝对路径
-   * @retval  int32_t
-   * @author  moon
-   */
   int32_t Init(const std::string &hosts, const std::string &root_path = "/",
                const clientid_t *client_id = NULL);
 
@@ -296,38 +205,17 @@ class ZookeeperManager {
 
   void SetCallWatcherFuncOnResume(bool flag);
 
-  /** 连接，阻塞操作，直到连接成功或者超时，超时后，也许会连接成功，更加稳妥的做法是，重新连接
-   *
-   * @param   const std::string & hosts
-   * @param   std::shared_ptr<WatcherFunType> global_watcher_fun
-   * @param   int32_t recv_timeout_ms
-   * @param   uint32_t conn_timeout_ms 连接超时时间，为0表示永久等待
-   * @retval  int32_t
-   * @author  moon
-   */
   int32_t Connect(std::shared_ptr<WatcherFuncType> global_watcher_fun,
                   int32_t recv_timeout_ms, uint32_t conn_timeout_ms = 3000);
 
-  /** 获得ClientID
-   *
-   * @retval 	const zookeeper::clientid_t *
-   * @author 	moon
-   */
   const clientid_t *GetClientID() { return &m_zk_client_id_; }
 
-  /** 重连，重连会导致所有的Watcher重新注册，使用shared_ptr避免重连时的一次拷贝构造
-   *  阻塞操作
-   *
-   * @retval  int32_t
-   * @author  moon
-   */
   int32_t Reconnect();
 
   int GetStatus() { return zoo_state(m_zhandle_); }
 
   zhandle_t *GetHandler() { return m_zhandle_; }
 
-  // AExists接口如果调用成功，节点存在，一定包含Stat数据
   int32_t AExists(const std::string &path,
                   std::shared_ptr<StatCompletionFuncType> stat_completion_func,
                   int watch = 0);
@@ -450,47 +338,16 @@ class ZookeeperManager {
 
   int32_t Multi(MultiOps &multi_ops, std::vector<zoo_op_result_t> &results);
 
-  /** 相对路径转绝对路径，如果已经是绝对路径了，就原样返回
-   *
-   * @param   const std::string & path
-   * @retval  const std::string
-   * @author  moon
-   */
   const std::string ChangeToAbsPath(const std::string &path);
 
-  /* 额外接口 */
-
-  /** 递归创建路径，内容为空，仅支持创建普通节点，因为增加其他的操作会增加不少复杂度
-   *
-   * @param   const std::string & path
-   * @retval  int32_t
-   * @author  moon
-   */
   int32_t CreatePathRecursion(const std::string &path);
 
-  /** 递归删除路径
-   *
-   * @param   const std::string & path
-   * @retval  int32_t
-   * @author  moon
-   */
   int32_t DeletePathRecursion(const std::string &path);
 
-  /** 将节点的子节点的Key和Value都拿出来
-   *
-   * @param 	const std::string & path
-   * @param 	std::map<std::string
-   * @param 	ValueStat> & children_value
-   * @param 	uint32_t max_value_size
-   * 由于获得节点内容需要预先分配内存，这个值表示每个Value预先分配内存的大小
-   * @retval 	int32_t
-   * @author 	moon
-   */
   int32_t GetChildrenValue(const std::string &path,
                            std::map<std::string, ValueStat> &children_value,
                            uint32_t max_value_size = 2048);
 
-  // 获得以'\0'结尾的字符串数据，缓冲区data的长度需要用户预先分配（包含结尾的'\0'）
   int32_t GetCString(const std::string &path, std::string &data,
                      Stat *stat = NULL, int watch = 0);
 
@@ -507,56 +364,38 @@ class ZookeeperManager {
  protected:
   zhandle_t *m_zhandle_;
   std::string m_hosts_;
-  // API内部根目录，初始化后，一定是合法的
   std::string m_root_path_;
 
-  // Zookeeper创建的线程的ID
   pid_t m_zk_tid_;
-
-  // 是否需要重连后重新注册Watcher和临时节点
-  //    bool m_need_resume_env;
-
-  // Zookeeper连接成功后，会置上这个ClientID，初始化时也可以填写，client_id为0表示不使用
   clientid_t m_zk_client_id_;
 
   std::mutex m_connect_lock_;
   std::condition_variable m_connect_cond_;
 
-  // 全局Watcher的context
   std::shared_ptr<ZookeeperCtx> m_global_watcher_context_;
 
   std::mutex m_custom_watcher_contexts_mutex_;
-  // <绝对路径,用户自定义Watcher的context>，用于断线重连注册Watcher
   std::multimap<std::string, std::shared_ptr<ZookeeperCtx>>
       m_custom_watcher_contexts_;
 
   std::mutex m_global_watcher_path_type_mutex_;
-  // <全局Watcher的绝对路径,Watcher类型>，类型为GlobalWatcherType的值或结果，用于自动重注册Watcher和断线重连注册
   std::map<std::string, uint8_t> m_global_watcher_path_type_;
 
-  // std::recursive_mutex m_ephemeral_node_info_lock_;
   std::mutex m_ephemeral_node_info_lock_;
-
-  // <绝对路径,所有临时节点信息>
   std::map<std::string, EphemeralNodeInfo> m_ephemeral_node_info_;
-
-  // user specified whether call watcher function on resume
 
   bool call_watcher_func_on_resume_;
 
-  // user specified retry max count and alert count
   int reconnect_max_count_;    // if <= 0 then reconnect until succeed
   int resume_max_count_;       // if <= 0, will use default value
   int reconnect_alert_count_;  // if <= 0, will use default value
   int resume_alert_count_;     // if <= 0, will use default value
 
-  // user specified interface
   std::function<void()> reconnect_alerter_;
   std::function<void()> resume_global_watcher_alerter_;
   std::function<void()> resume_custom_watcher_alerter_;
   std::function<void()> resume_ephemeral_node_alerter_;
 
-  /* 内部函数，用于传递给Zookeeper API */
   // When global or custom watcher is triggered，InnerWatcherCbFunc will be
   // called Each watcher has unique context InnerWatcherCbFunc re-registers the
   // watcher and call global or custom watcher callback func in its context
@@ -641,32 +480,11 @@ class ZookeeperManager {
 
   bool ResumeEphemeralNode();
 
-  /** 处理批量操作过程中对临时节点列表的操作
-   *
-   * @param 	const std::vector<zoo_op> & multi_ops
-   * @param 	const std::vector<zoo_op_result_t> & multi_result
-   * @retval 	void
-   * @author 	moon
-   */
   void ProcMultiEphemeralNode(const std::vector<zoo_op> &multi_ops,
                               const std::vector<zoo_op_result_t> &multi_result);
 
-  /** 处理异步操作成功后，对于Watcher的处理
-   *
-   * @param 	ZookeeperCtx & context
-   * @retval 	void
-   * @author 	moon
-   */
   void ProcAsyncWatcher(ZookeeperCtx &context);
 
-  /** 删除原生API中指定Watcher
-   *
-   * @param 	int type
-   * @param 	const char * abs_path
-   * @param 	void * zookeeper_context
-   * @retval 	void
-   * @author 	moon
-   */
   void DeleteWatcher(int type, const char *p_abs_path, void *zookeeper_context);
 
   ZookeeperManager(ZookeeperManager &&right) = delete;

@@ -7,24 +7,12 @@
 
 #include <cstring>
 
-//#include <boost/asio.hpp>
-//#include <boost/algorithm/string/trim.hpp>
-//#include <boost/algorithm/string/split.hpp>
-
-#ifdef CPP_ZK_USE_BOOST
-#include <boost/property_tree/ptree.hpp>
-#include <boost/property_tree/xml_parser.hpp>
-#endif
-
-// hashtable_search需要包含
 #include "zookeeper/hashtable/hashtable_private.h"
 #include "zookeeper/zk_adaptor.h"
 
-// 这个宏必须加上, 因为封装API基于多线程, 多线程和单线程的对象是不一样的,
-// 二者不能共用
 #define THREADED
 
-// 用于删除注册的Watcher, 数据结构从zk_hashtable.c中获得
+// from zk_hashtable.c
 typedef struct _watcher_object {
   watcher_fn watcher;
   void *context;
@@ -82,10 +70,8 @@ void SplitStr(string str, const vector<string> &split_str,
               vector<string> &result, bool remove_empty_elm = true,
               size_t max_count = 0) {
   result.clear();
-  // 当前已获得段数
   size_t cur_count = 0;
 
-  // 从所有分割字符串中查找最小的索引
   size_t index = string::npos;
   size_t split_len = 0;
   size_t cur_index;
@@ -104,7 +90,6 @@ void SplitStr(string str, const vector<string> &split_str,
 
   while (index != string::npos) {
     if (index != 0 || !remove_empty_elm) {
-      // 将找到的字符串放入结果中
       ++cur_count;
       if (max_count > 0 && cur_count >= max_count) {
         break;
@@ -112,10 +97,8 @@ void SplitStr(string str, const vector<string> &split_str,
       result.push_back(str.substr(0, index));
     }
 
-    // 将之前的字符和分割符都删除
     str.erase(str.begin(), str.begin() + index + split_len);
 
-    // 继续查找下一个
     index = string::npos;
     for (vector<string>::const_iterator it = split_str.begin();
          it != split_str.end(); ++it) {
@@ -131,7 +114,6 @@ void SplitStr(string str, const vector<string> &split_str,
     }
   }
 
-  // 把剩下的放进去
   if (str.length() > 0 || !remove_empty_elm) {
     result.push_back(str);
   }
@@ -183,39 +165,24 @@ class ZookeeperCtx {
   shared_ptr<StringCompletionFuncType> m_string_completion_func;
   shared_ptr<StringsStatCompletionFuncType> m_strings_stat_completion_func;
 
-  // 是否自动重新注册Watcher, 重新注册的话, 会使用原有的Context
   bool m_auto_reg_watcher;
-
-  // 当前ctx是由什么操作触发的
   WatcherType m_watcher_type;
 
-  // 临时节点信息, 不为空时用于异步操作成功后写入临时节点信息,
-  // 如果m_ephemeral_path不为空, m_ephemeral_info为NULL, 表示临时节点信息被删除,
-  // 在VoidCompletionFuncType中需要处理
   string m_ephemeral_path;
-  // 临时节点信息, 不为NULL时用于异步操作成功后写入临时节点信息
   shared_ptr<EphemeralNodeInfo> m_ephemeral_info;
 
-  // Watch的Path, 用于异步操作成功后添加Watcher信息
   string m_watch_path;
-  // 自定义Watcher的Context, 用于异步操作成功后添加Watcher信息
   shared_ptr<ZookeeperCtx> m_custom_watcher_context;
-  // 全局Watcher要添加的类型, 用于异步操作成功后添加全局Watcher信息
+
   uint8_t m_global_watcher_add_type;
 
-  // 批量操作相关数据
-  // 批量操作请求
   shared_ptr<MultiOps> m_multi_ops;
-  // 批量操作结果
   shared_ptr<vector<zoo_op_result_t>> m_multi_results;
 
  private:
   ZookeeperCtx(ZookeeperCtx &&right) = delete;
-
   ZookeeperCtx(const ZookeeperCtx &right) = delete;
-
   ZookeeperCtx &operator=(ZookeeperCtx &&right) = delete;
-
   ZookeeperCtx &operator=(const ZookeeperCtx &right) = delete;
 };
 
@@ -224,35 +191,14 @@ ZookeeperManager::ZookeeperManager()
       m_dont_close_(false),
       m_zhandle_(NULL),
       m_zk_tid_(0) {
-  //        : m_dont_close_(false), m_zhandle_(NULL), m_zk_tid_(0),
-  //        m_need_resume_env(false) {
   m_zk_client_id_.client_id = 0;
 }
-
-#ifdef CPP_ZK_USE_BOOST
-int32_t ZookeeperManager::InitFromFile(const string &config_file_path,
-                                       const clientid_t *client_id /*= NULL*/) {
-  try {
-    boost::property_tree::ptree zk_conf_pt;
-    read_xml(config_file_path, zk_conf_pt);
-
-    string hosts = zk_conf_pt.get<string>("ZkConf.Hosts", "");
-    string root_path = zk_conf_pt.get<string>("ZkConf.Root", "/");
-
-    return Init(hosts, root_path, client_id);
-  } catch (const boost::property_tree::xml_parser_error &e) {
-        M_LOG_ERROR << "read zookeeper path failed from : " << config_file_path << ", exception: " << e.what());
-        return ZSYSTEMERROR;
-  }
-}
-#endif
 
 int32_t ZookeeperManager::Init(const string &hosts,
                                const string &root_path /*= "/"*/,
                                const clientid_t *client_id /*= NULL*/) {
   m_hosts_ = hosts;
   m_root_path_ = root_path;
-  //    m_need_resume_env = false;
 
   if (m_root_path_.empty() || m_root_path_.at(0) != '/') {
     M_LOG_ERROR << "invalid API root path: " << m_root_path_;
@@ -263,7 +209,6 @@ int32_t ZookeeperManager::Init(const string &hosts,
     m_zk_client_id_ = *client_id;
   }
 
-  // default value
   reconnect_max_count_ = INT_MAX;
   resume_max_count_ = 5;
   reconnect_alert_count_ = 3;
@@ -360,14 +305,12 @@ int32_t ZookeeperManager::Connect(
     shared_ptr<WatcherFuncType> global_watcher_fun, int32_t recv_timeout_ms,
     uint32_t conn_timeout_ms /*= 3000*/) {
   m_zk_tid_ = 0;
-  //    m_need_resume_env = true;
   if (m_zhandle_ != NULL) {
     M_LOG_SPCL << "close none NULL m_zhandle_!";
     zookeeper_close(m_zhandle_);
     m_zhandle_ = NULL;
   }
 
-  // Watcher已经变了, 重置
   if (m_global_watcher_context_ == NULL ||
       m_global_watcher_context_->m_watcher_func != global_watcher_fun) {
     m_global_watcher_context_ =
@@ -391,7 +334,6 @@ int32_t ZookeeperManager::Connect(
     return errno;
   }
 
-  // 等待连接建立
   if (syscall(__NR_gettid) != m_zk_tid_) {
     M_LOG_SPCL << "wait for connected event...";
     unique_lock<mutex> conn_lock(m_connect_lock_);
@@ -421,7 +363,6 @@ int32_t ZookeeperManager::Connect(
 int32_t ZookeeperManager::Reconnect() {
   M_LOG_SPCL << "start reconnecting...";
 
-  // 清空ClientID, 因为session过期才会进行重连, 此时ClinetID已经无效了
   m_zk_client_id_.client_id = 0;
   ZookeeperCtx *p_context = const_cast<ZookeeperCtx *>(
       reinterpret_cast<const ZookeeperCtx *>(zoo_get_context(m_zhandle_)));
@@ -674,7 +615,6 @@ int32_t ZookeeperManager::AGetChildren(
     const string &path,
     shared_ptr<StringsStatCompletionFuncType> strings_stat_completion_func,
     shared_ptr<WatcherFuncType> watcher_func, bool need_stat /*= false*/) {
-  // 此处需要创建2个context
   int32_t ret = ZOK;
 
   ZookeeperCtx *p_zookeeper_context = new ZookeeperCtx(*this);
@@ -714,7 +654,6 @@ int32_t ZookeeperManager::GetChildren(const string &path,
                                       ScopedStringVector &strings,
                                       int watch /*= 0*/,
                                       Stat *stat /*= NULL*/) {
-  // 这里要Clear掉它, 避免内部还有数据时导致内存泄露
   strings.Clear();
   string abs_path = ChangeToAbsPath(path);
   int32_t ret = ZOK;
@@ -819,24 +758,14 @@ int32_t ZookeeperManager::Create(
     bool ephemeral_exist_skip /*= false*/) {
   string abs_path = ChangeToAbsPath(path);
   int32_t ret;
-  string exist_value;  // 节点存在的话, 保存其Value
-  string exist_path;  // 节点存在的话, 保存其路径, 不为空, 表示节点存在
-  Stat exist_stat;  // 节点存在的话, 保存其stat
+  string exist_value;
+  string exist_path;
+  Stat exist_stat;
   bzero(&exist_stat, sizeof(exist_stat));
 
-  // 重连恢复API临时节点状态步骤
   if (ephemeral_exist_skip && (flags & ZOO_EPHEMERAL)) {
     exist_value.resize(value_len);
     if (flags & ZOO_SEQUENCE) {
-      // 如果是序列节点, 获得当前父节点所有的子节点,
-      // 判断有没有正则表达式为"[节点名]\w{10}"的节点 有的话,
-      // 获得他们的owner信息, 如果找到了,
-      // 则将此节点加入到m_ephemeral_node_info中
-      // 这个只能适用于一个同名节点的情况, 如果有超过1个以上的同名节点,
-      // 则不支持, 目前也没有这样的需求, 比如创建2个名为node,
-      // flag为ZOO_EPHEMERAL|ZOO_SEQUENCE的节点
-
-      // 获得节点名和父路径
       size_t index = abs_path.rfind('/');
       if (index == string::npos) {
         M_LOG_ERROR << "can not get parent path of: " << abs_path;
@@ -846,7 +775,6 @@ int32_t ZookeeperManager::Create(
       string parent_path = abs_path.substr(0, index);
       string node_name = abs_path.substr(index + 1);
 
-      // 获得所有子节点
       ScopedStringVector children;
       ret = GetChildren(parent_path, children);
       if (ret != ZOK) {
@@ -855,23 +783,20 @@ int32_t ZookeeperManager::Create(
         return ret;
       }
 
-      static const uint32_t SEQUENCE_LEN = 10;  // 序号长度, 全是数字
-      list<string> match_children;              // 符合条件的children
+      static const uint32_t SEQUENCE_LEN = 10;
+      list<string> match_children;
       for (int32_t ci = 0; ci < children.count; ++ci) {
         char *child = children.GetData(ci);
         uint32_t children_len = strlen(child);
 
-        // 序号节点名长度 = 原节点名长度 + SEQUENCE_LEN, 不符合的跳过
         if (node_name.size() + SEQUENCE_LEN != children_len) {
           continue;
         }
 
-        // 如果节点名前node_name.size()不一样, 跳过
         if (memcmp(child, node_name.c_str(), node_name.size()) != 0) {
           continue;
         }
 
-        // 判断children后SEQUENCE_LEN个字符是不是都是数字, 如果不是, 跳过
         uint32_t i = node_name.size();
         for (; i < node_name.size() + SEQUENCE_LEN; ++i) {
           if (!isdigit(child[i])) {
@@ -880,12 +805,10 @@ int32_t ZookeeperManager::Create(
         }
 
         if (i == node_name.size() + SEQUENCE_LEN) {
-          // 符合条件
           match_children.push_back(child);
         }
       }
 
-      // 获得所有符合条件的节点Stat, 判断owner是否是自己
       for (auto child_it = match_children.begin();
            child_it != match_children.end(); ++child_it) {
         int buf_len = value_len;
@@ -899,13 +822,11 @@ int32_t ZookeeperManager::Create(
         }
 
         if (exist_stat.ephemeralOwner == m_zk_client_id_.client_id) {
-          // 找到了, 返回
           exist_path = child_path;
           break;
         }
       }
     } else {
-      // 如果是普通临时节点, 直接Get出Stat判断Owner即可
       char child_buf[1];
       int buf_len = sizeof(child_buf);
       ret = Get(path, child_buf, &buf_len, &exist_stat);
@@ -927,7 +848,6 @@ int32_t ZookeeperManager::Create(
               p_real_path->size());
     }
 
-    // 已经存在, 处理value, 如果Value不同, 则重新写入
     if (memcmp(exist_value.c_str(), value, value_len) != 0) {
       ret = Set(exist_path, value, value_len, exist_stat.version);
       if (ret != ZOK) {
@@ -936,8 +856,6 @@ int32_t ZookeeperManager::Create(
         return ret;
       }
     }
-
-    // TODO(moon)：这里没有判断ACL, 目前没需求, 后面有的话, 要加上判断
   } else {
     ret = zoo_create(
         m_zhandle_, abs_path.c_str(), value, value_len, acl, flags,
@@ -951,9 +869,7 @@ int32_t ZookeeperManager::Create(
     }
   }
 
-  // 调用成功
   if (flags & ZOO_EPHEMERAL) {
-    // 如果是临时节点, 添加到临时节点列表中。
     std::unique_lock<std::mutex> ephemeral_node_info_lock(
         m_ephemeral_node_info_lock_);
     if (m_ephemeral_node_info_.count(abs_path) == 0) {
@@ -977,7 +893,6 @@ int32_t ZookeeperManager::Create(
                 ephemeral_exist_skip);
 }
 
-///// 递归创建结点, 即其父结点不存在时创建父结点
 int32_t ZookeeperManager::CreateRecursively(
     const std::string &path, const std::string &value,
     std::string *p_real_path /*= NULL*/,
@@ -1074,12 +989,10 @@ int32_t ZookeeperManager::Set(const string &path, const char *buffer,
     M_LOG_ERROR << "abs_path[" << abs_path << "], ret[" << ret << "], zerror["
                 << ZError(ret) << "]";
   } else {
-    // 调用成功
     std::unique_lock<std::mutex> ephemeral_node_info_lock(
         m_ephemeral_node_info_lock_);
     auto ephemeral_it = m_ephemeral_node_info_.find(abs_path);
     if (ephemeral_it != m_ephemeral_node_info_.end()) {
-      // 如果在临时节点列表中找到, 修改数据
       ephemeral_it->second.data.assign(buffer, buf_len);
     }
   }
@@ -1129,13 +1042,11 @@ int32_t ZookeeperManager::Delete(const string &path, int version /*= -1*/) {
     M_LOG_ERROR << "delete failed, abs_path[" << abs_path << "], ret[" << ret
                 << "], zerror[" << ZError(ret) << "]";
   } else {
-    // 调用成功
     M_LOG_SPCL << "delete succeed, abs_path[" << abs_path << "], ret[" << ret
                << "], zerror[" << ZError(ret) << "]";
     std::unique_lock<std::mutex> ephemeral_node_info_lock(
         m_ephemeral_node_info_lock_);
     if (m_ephemeral_node_info_.find(abs_path) != m_ephemeral_node_info_.end()) {
-      // 如果在临时节点列表中找到, 删除它
       m_ephemeral_node_info_.erase(abs_path);
       M_LOG_SPCL << "delete ephemeral node info: " << abs_path
                  << ", ephemeral node number: "
@@ -1219,12 +1130,10 @@ int32_t ZookeeperManager::SetAcl(const string &path, int version,
     M_LOG_ERROR << "abs_path[" << abs_path << "], ret[" << ret << "], zerror["
                 << ZError(ret) << "]";
   } else {
-    // 调用成功
     std::unique_lock<std::mutex> ephemeral_node_info_lock(
         m_ephemeral_node_info_lock_);
     auto ephemeral_it = m_ephemeral_node_info_.find(abs_path);
     if (ephemeral_it != m_ephemeral_node_info_.end()) {
-      // 如果在临时节点列表中找到, 修改数据
       ephemeral_it->second.acl = *acl;
     }
   }
@@ -1264,17 +1173,14 @@ int32_t ZookeeperManager::AMulti(
 
 int32_t ZookeeperManager::Multi(MultiOps &multi_ops,
                                 vector<zoo_op_result_t> &results) {
-  // 为了保证没有之前使用的脏数据, 这里必须clear掉
   results.clear();
   results.resize(multi_ops.m_multi_ops.size());
 
-  // TODO(moon)：官方API中如果操作数量为0怎么办？
   if (multi_ops.m_multi_ops.empty()) {
     M_LOG_WARN << "multiple operations count is 0!";
     return ZBADARGUMENTS;
   }
 
-  // TODO(moon)：注意包量总大小限制1M
   int32_t ret = zoo_multi(m_zhandle_, multi_ops.m_multi_ops.size(),
                           &multi_ops.m_multi_ops[0], &results[0]);
   if (ret != ZOK) {
@@ -1282,43 +1188,35 @@ int32_t ZookeeperManager::Multi(MultiOps &multi_ops,
                 << "], ret[" << ret << "], zerror[" << ZError(ret) << "]";
   }
 
-  // 处理临时节点, 这里可能部分成功, 部分失败
   ProcMultiEphemeralNode(multi_ops.m_multi_ops, results);
 
   return ret;
 }
 
 const string ZookeeperManager::ChangeToAbsPath(const string &path) {
-  // 为空, 返回根目录
   if (path.empty()) {
     return m_root_path_;
   }
 
-  // 本来就是绝对路径, 直接返回
   if (path.at(0) == '/') {
     return path;
   }
 
-  // 相对路径的处理
   if (!m_root_path_.empty() && m_root_path_.back() == '/') {
-    // 如果是绝对根目录, 根目录后不加'/'
     return m_root_path_ + path;
   }
 
   return m_root_path_ + "/" + path;
 }
 
-///// 递归创建路径, 即检查不存在的结点, 依次创建不存在的结点
 int32_t ZookeeperManager::CreatePathRecursion(const string &path) {
   int32_t ret;
 
-  // 创建节点, 忽略节点已存在的错误
   string abs_path = ChangeToAbsPath(path);
   vector<string> dirs;
   SplitStr(abs_path, "/", dirs);
   string curr_path;
 
-  // 先使用批量check接口逐步判断节点是否存在, 对不存在的节点进行批量创建
   MultiOps multi_check_ops(this);
   for (auto dir_it = dirs.begin(); dir_it != dirs.end(); ++dir_it) {
     curr_path += string("/") + *dir_it;
@@ -1328,7 +1226,6 @@ int32_t ZookeeperManager::CreatePathRecursion(const string &path) {
   vector<zoo_op_result_t> results;
   ret = Multi(multi_check_ops, results);
   if (ret == ZNONODE) {
-    // 如果某一级节点不存在, 则将此级及以后的节点全部批量创建
     MultiOps multi_create_ops(this);
     bool start_no_node = false;
 
@@ -1337,7 +1234,6 @@ int32_t ZookeeperManager::CreatePathRecursion(const string &path) {
          result_it != results.end() &&
          check_op_it != multi_check_ops.m_multi_ops.end();
          ++result_it, ++check_op_it) {
-      // 跳过前面已经存在的节点
       if (result_it->err == ZOK && !start_no_node) {
         continue;
       }
@@ -1347,7 +1243,6 @@ int32_t ZookeeperManager::CreatePathRecursion(const string &path) {
       multi_create_ops.AddCreateOp(check_op_it->check_op.path, "");
     }
 
-    // 执行批量创建
     ret = Multi(multi_create_ops, results);
     if (ret != ZOK) {
       M_LOG_ERROR << "multiple creation failed, ret[" << ret << "], zerror["
@@ -1359,21 +1254,15 @@ int32_t ZookeeperManager::CreatePathRecursion(const string &path) {
   return ret;
 }
 
-///// 递归删除结点, 即删除这个路径下所有子结点和当前结点
 int32_t ZookeeperManager::DeletePathRecursion(const string &path) {
-  // 获得路径所有的子节点, 按照顺序存储起来
-  list<string> path_to_get_children;  // 需要获得子节点的节点, 预处理节点列表
-  list<string>
-      path_to_delete;  // 需要删除的节点, 越往后, 节点越深, 所以需要从后往前删除
-
+  list<string> path_to_get_children;
+  list<string> path_to_delete;
   string abs_path = ChangeToAbsPath(path);
-  path_to_get_children.push_back(
-      abs_path);  // 将需要删除的根节点塞进去, 以备获得它的子节点
+  path_to_get_children.push_back(abs_path);
 
   ScopedStringVector children;
   int32_t ret;
   while (!path_to_get_children.empty()) {
-    // 从预处理节点列表后面获得一个节点, 采用深度遍历（栈：后进先出）
     auto curr_path = move(*path_to_get_children.rbegin());
     path_to_get_children.pop_back();
     children.Clear();
@@ -1383,7 +1272,6 @@ int32_t ZookeeperManager::DeletePathRecursion(const string &path) {
                   << abs_path << "] get sub node[" << curr_path << "] failed";
     }
 
-    // 节点已经不存在了, 则跳过
     if (ret == ZNONODE) {
       continue;
     }
@@ -1393,12 +1281,9 @@ int32_t ZookeeperManager::DeletePathRecursion(const string &path) {
     }
 
     M_LOG_SPCL << "add node to delete stack: " << curr_path;
-    // 将此节点从预处理节点列表中移动到需要删除的节点列表,
-    // 并且将它的所有子节点插入到预处理节点后
     path_to_delete.push_back(move(curr_path));
   }
 
-  // 批量删除, 从删除列表中从后往前添加批量删除操作
   if (!path_to_delete.empty()) {
     MultiOps multi_delete_ops(this);
     for (auto path_it = path_to_delete.rbegin();
@@ -1420,13 +1305,10 @@ int32_t ZookeeperManager::DeletePathRecursion(const string &path) {
     }
   }
 
-  // 寻找该路径下所有临时节点信息, 删除, 避免临时节点不在Multi操作中删除,
-  // 从而漏删临时节点 测试用例：ZooKeeper.ZkManagerEphemeralNodeTest
   std::unique_lock<std::mutex> ephemeral_node_info_lock(
       m_ephemeral_node_info_lock_);
 
-  string pre_path =
-      abs_path + "/";  // 临时节点路径前缀, 注意这里是需要包含"/"的, 否则会误删
+  string pre_path = abs_path + "/";
   for (auto node_it = m_ephemeral_node_info_.begin();
        node_it != m_ephemeral_node_info_.end();) {
     if (node_it->first.find(pre_path) == 0) {
@@ -1440,7 +1322,6 @@ int32_t ZookeeperManager::DeletePathRecursion(const string &path) {
     }
   }
 
-  // 再尝试删除abs_path自身
   if (m_ephemeral_node_info_.count(abs_path) > 0) {
     m_ephemeral_node_info_.erase(abs_path);
     M_LOG_SPCL
@@ -1478,7 +1359,6 @@ int32_t ZookeeperManager::GetChildrenValue(
       return ret;
     }
 
-    // resize到实际长度
     value_stat.value.resize(value_len);
   }
 
@@ -1533,7 +1413,6 @@ void ZookeeperManager::DeleteWatcher(int type, const char *p_abs_path,
     return;
   }
 
-  // 要处理的Watcher哈希表, 根据不同的type, 有不同的表
   list<hashtable *> hashtables_to_search;
 
 #define ADD_WATCHER_HASHTABLE(watchers)             \
@@ -1550,7 +1429,7 @@ void ZookeeperManager::DeleteWatcher(int type, const char *p_abs_path,
     ADD_WATCHER_HASHTABLE(GetHandler()->active_exist_watchers);
     ADD_WATCHER_HASHTABLE(GetHandler()->active_child_watchers);
   } else {
-    // 无操作
+    // Nothing
   }
 
 #undef ADD_WATCHER_HASHTABLE
@@ -1564,14 +1443,11 @@ void ZookeeperManager::DeleteWatcher(int type, const char *p_abs_path,
       continue;
     }
 
-    // 删除指定context的Watcher
     watcher_object_t *p_watcher = wl->head;
     watcher_object_t *p_last = p_watcher;
     while (p_watcher != NULL) {
-      // 要删除
       if (p_watcher->context == p_zookeeper_context) {
         if (p_watcher == wl->head) {
-          // 头结点
           wl->head = p_watcher->next;
         } else {
           p_last->next = p_watcher->next;
@@ -1579,7 +1455,6 @@ void ZookeeperManager::DeleteWatcher(int type, const char *p_abs_path,
 
         to_free.push_back(p_watcher);
       } else {
-        // 不删除
         p_last = p_watcher;
       }
 
@@ -1653,7 +1528,6 @@ void ZookeeperManager::InnerWatcherCbFunc(zhandle_t *zh, int type, int state,
     }
 
     HandleSessionEvent(manager, state);
-    // 重连之后, 直接返回, 因为上次连接的相关的各种句柄已经失效
     // if call_watcher_func_on_resume_ is true, all user watcher function will
     // be called when resume success
     if (state == ZOO_EXPIRED_SESSION_STATE) return;
@@ -1674,23 +1548,8 @@ void ZookeeperManager::InnerWatcherCbFunc(zhandle_t *zh, int type, int state,
     return;
   }
 
-  // 调用用户的Watcher
-  // 删除指定节点的Watcher,
-  // 回调返回true或者之前流程将p_context->m_is_stop置为true表示要删除这个Watcher
-  // m_is_stop is not used, user can return true in m_watcher_func, so this
-  // watcher will be removed
-  //    if (p_context->m_is_stop || (*p_context->m_watcher_func)(manager, type,
-  //    state, abs_path)) {
-
-  // 在这添加获取数据内容
-  // 类成员封装 manager type state path 以及 data
-  // exist 只拿数据不注册watcher
-  // get 拿数据并注册watcher
-  // get children 拿数据并注册watcher
-
   if ((*p_context->m_watcher_func)(manager, type, state, p_abs_path)) {
     if (p_context->m_watcher_type == ZookeeperCtx::GLOBAL) {
-      /////       删除指定路径的当前全局Watcher
       std::unique_lock<std::mutex> lock(
           manager.m_global_watcher_path_type_mutex_);
       auto it = manager.m_global_watcher_path_type_.find(abs_path);
@@ -1710,17 +1569,6 @@ void ZookeeperManager::InnerWatcherCbFunc(zhandle_t *zh, int type, int state,
         }
       }
     } else {
-      // 删除指定节点的自定义Watcher
-      //            p_context->m_is_stop = true;
-      /////            删除custom context之后, 到删除c api watcher之前,
-      ///这个watcher对应的事件可能还会触发,
-      /////            调用到InnerWatcherCbFunc后, 如果p_context已被释放,
-      ///会有出现内存访问错误
-      /////            所以只在设置custom watcher invalid, 并且删除c api
-      /// watcher, 但不将custom context删除
-      /////            M_LOG_WARN << "try to delete custom watcher(context),
-      /// path[" << abs_path << "]";
-      /////            manager.DelCustomWatcherCtx(abs_path, p_context);
       M_LOG_WARN << "set custom watcher(context) invalid, path[" << abs_path
                  << "], origin watcher type[" << p_context->m_watcher_type
                  << "], "
@@ -1729,14 +1577,7 @@ void ZookeeperManager::InnerWatcherCbFunc(zhandle_t *zh, int type, int state,
                  << manager.GetClientID()->client_id << "]";
       SetWatcherContextInvalid(p_context);
 
-      // 删除上面的流程重注册的信息, 这里如果不删除的话, 可能还会触发回调,
-      // 但是context已经在上面被释放了 虽然有多重机制保障不会出问题,
-      // 但是如果原始地址仍然是一个context, 还是会出问题。
-      // 还可能会出现更严重的内存访问错误的问题。
-      // 这里是删除原生API中回调的Watcher
       manager.DeleteWatcher(type, p_abs_path, p_context);
-      // destroy_watcher_object_list(collectWatchers(manager.m_zhandle_, type,
-      // const_cast<char *>(abs_path)));
     }
   } else {
     if (p_context->m_watcher_type == ZookeeperCtx::GLOBAL) {
@@ -1756,23 +1597,17 @@ void ZookeeperManager::InnerWatcherCbFunc(zhandle_t *zh, int type, int state,
 void ZookeeperManager::HandleSessionEvent(ZookeeperManager &manager,
                                           int state) {
   if (state == ZOO_CONNECTED_STATE) {
-    // 连接建立事件
     M_LOG_SPCL << "trigger connected event, if reconnected, need to resume "
                   "environment, client_id: "
                << manager.GetClientID()->client_id;
-    //            if (manager.m_need_resume_env) { manager.ResumeEnv(); }
     manager.m_connect_cond_.notify_all();
   } else if (state == ZOO_EXPIRED_SESSION_STATE) {
-    // 超时事件, 重新连接, 直到成功
     M_LOG_SPCL
         << "trigger session expired event, need to reconnect, client_id: "
         << manager.GetClientID()->client_id;
     std::thread reconnectExecutor =
         std::thread(&ZookeeperManager::TimeoutReconnect, std::ref(manager));
     reconnectExecutor.detach();
-    // 重连之后, 直接返回, 因为上次连接的相关的各种句柄已经失效
-    // if call_watcher_func_on_resume_ is true, all user watcher function will
-    // be called when resume success
   } else {
     M_LOG_WARN << "trigger session event, current state: " << state
                << ", client_id: " << manager.GetClientID()->client_id;
@@ -1806,7 +1641,6 @@ void ZookeeperManager::TimeoutReconnect(ZookeeperManager &manager) {
       if (period < 30) ++period;
       continue;
     }
-    // 重连之后, 直接返回, 因为上次连接的相关的各种句柄已经失效
     M_LOG_SPCL << "succeeded on " << reconnect_count
                << " reconnection, now start to resume environment...";
     if (!manager.ResumeEnv()) {
@@ -1866,7 +1700,7 @@ bool ZookeeperManager::IsValidEvent(ZookeeperCtx *p_context,
   } else if (watcher_type == NO_TYPE_IN_PATH) {
     M_LOG_ERROR << "no global watcher type of path: " << abs_path;
     return false;
-  } else if (watcher_type == ZookeeperCtx::GLOBAL) {  ///// todo 改成一套type
+  } else if (watcher_type == ZookeeperCtx::GLOBAL) {
     if (type == ZOO_CHANGED_EVENT) {
       return (((watcher_type & WATCHER_GET) == WATCHER_GET) ||
               ((watcher_type & WATCHER_EXISTS) == WATCHER_EXISTS));
@@ -1976,8 +1810,6 @@ int ZookeeperManager::CustomWatcherAutoRegisterer(ZookeeperCtx *p_context,
       M_LOG_WARN << "node has been deleted, abs_path: " << abs_path;
       ret = AddExistWatcherOnce(p_context, p_abs_path, false);
     } else if (type == ZOO_CHILD_EVENT || type == ZOO_CREATED_EVENT) {
-      // TODO(moon)：看是否需要把children和stat传给watcher, 避免watcher中调用,
-      // 看使用量, 这些参数可以统一封装在一个对象里
       ScopedStringVector children;
       ret = zoo_wget_children(manager.GetHandler(), p_abs_path,
                               &ZookeeperManager::InnerWatcherCbFunc, p_context,
@@ -2017,14 +1849,11 @@ int ZookeeperManager::GlobalWatcherAutoRegisterer(ZookeeperCtx *p_context,
 
   uint32_t global_watcher_type = GetWatcherType(p_context, abs_path);
   if (global_watcher_type == NO_TYPE_IN_PATH) {
-    // 全局事件, 找不到type, 不再调用Watcher, 直接返回
     M_LOG_ERROR << "can not find type in m_global_watcher_path_type_, do not "
                    "call watcher!";
     return NO_TYPE_IN_PATH;
   }
 
-  // Global类型, 表示使用的是默认的Watcher,
-  // 通过type和abs_path来判断使用方式与重注册
   if (type == ZOO_DELETED_EVENT) {
     if (((global_watcher_type & WATCHER_GET) == WATCHER_GET) ||
         ((global_watcher_type & WATCHER_GET_CHILDREN) ==
@@ -2033,10 +1862,8 @@ int ZookeeperManager::GlobalWatcherAutoRegisterer(ZookeeperCtx *p_context,
       ret = AddExistWatcherOnce(p_context, p_abs_path);
     }
   } else if (type == ZOO_CHANGED_EVENT) {
-    // 分别使用Exists和Get重注册
     if ((global_watcher_type & WATCHER_EXISTS) == WATCHER_EXISTS) {
       ret = manager.Exists(abs_path, NULL, 1);
-      // 节点不存在, 注册Watcher也是OK的
       if (ret == ZNONODE) {
         ret = ZOK;
       }
@@ -2051,17 +1878,14 @@ int ZookeeperManager::GlobalWatcherAutoRegisterer(ZookeeperCtx *p_context,
       }
     }
   } else if (type == ZOO_CREATED_EVENT) {
-    // 如果是节点创建, 使用Exists重注册
     if ((global_watcher_type & WATCHER_EXISTS) == WATCHER_EXISTS) {
       ret = manager.Exists(abs_path, NULL, 1);
-      // 节点不存在, 注册Watcher也是OK的
       if (ret == ZNONODE) {
         ret = ZOK;
       }
     }
   } else if (type == ZOO_CHILD_EVENT) {
     if ((global_watcher_type & WATCHER_GET_CHILDREN) == WATCHER_GET_CHILDREN) {
-      // 如果是子节点变更, 使用GetChildren重注册
       ScopedStringVector children;
       ret = manager.GetChildren(abs_path, children, 1);
       if (ret == ZNONODE) {
@@ -2070,7 +1894,7 @@ int ZookeeperManager::GlobalWatcherAutoRegisterer(ZookeeperCtx *p_context,
       }
     }
   } else {
-    // 无操作, 直接透传给全局Watcher callback func
+    // Nothing
   }
 
   if (ret != ZOK) {
@@ -2124,7 +1948,6 @@ uint8_t ZookeeperManager::GetStopWatcherTypeMask(ZookeeperCtx *p_context,
   std::unique_lock<std::mutex> lock(manager.m_global_watcher_path_type_mutex_);
   auto it = manager.m_global_watcher_path_type_.find(abs_path);
   if (it == manager.m_global_watcher_path_type_.end()) {
-    // 全局事件, 找不到type, 不再调用Watcher, 直接返回
     M_LOG_ERROR << "can not find type in m_global_watcher_path_type_, return "
                    "stop_watcher_type_mask 0!";
     return stop_watcher_type_mask;
@@ -2171,13 +1994,11 @@ void ZookeeperManager::InnerVoidCompletion(int ret_code,
     std::unique_lock<std::mutex> ephemeral_node_info_lock(
         manager.m_ephemeral_node_info_lock_);
     if (up_context->m_ephemeral_info == NULL) {
-      // 这种情况是删除临时节点
       manager.m_ephemeral_node_info_.erase(up_context->m_ephemeral_path);
       M_LOG_SPCL << "delete ephemeral node info: "
                  << up_context->m_ephemeral_path << ", ephemeral node number: "
                  << manager.m_ephemeral_node_info_.size();
     } else {
-      // 这种情况是修改临时节点信息, 比如ASetAcl中的操作
       manager.m_ephemeral_node_info_[up_context->m_ephemeral_path] =
           *up_context->m_ephemeral_info;
     }
@@ -2203,7 +2024,6 @@ void ZookeeperManager::InnerStatCompletion(int ret_code, const Stat *stat,
   ZookeeperManager &manager = up_context->m_zookeeper_manager;
 
   if (ret_code == ZOK) {
-    // 处理临时节点
     if (up_context->m_ephemeral_info != NULL &&
         !up_context->m_ephemeral_path.empty()) {
       std::unique_lock<std::mutex> ephemeral_node_info_lock(
@@ -2213,14 +2033,12 @@ void ZookeeperManager::InnerStatCompletion(int ret_code, const Stat *stat,
     }
   }
 
-  // Exist还要额外考虑ZNONODE返回值
   if (ret_code == ZOK ||
       (ret_code == ZNONODE &&
        (up_context->m_global_watcher_add_type == WATCHER_EXISTS ||
         (up_context->m_custom_watcher_context != NULL &&
          up_context->m_custom_watcher_context->m_watcher_type ==
              ZookeeperCtx::EXISTS)))) {
-    // 处理Watcher
     manager.ProcAsyncWatcher(*up_context);
   }
 
@@ -2245,7 +2063,6 @@ void ZookeeperManager::InnerDataCompletion(int ret_code, const char *value,
   ZookeeperManager &manager = up_context->m_zookeeper_manager;
 
   if (ret_code == ZOK) {
-    // 处理Watcher
     manager.ProcAsyncWatcher(*up_context);
   }
 
@@ -2271,7 +2088,6 @@ void ZookeeperManager::InnerStringsCompletion(int ret_code,
   ZookeeperManager &manager = up_context->m_zookeeper_manager;
 
   if (ret_code == ZOK) {
-    // 处理Watcher
     manager.ProcAsyncWatcher(*up_context);
   }
 
@@ -2297,7 +2113,6 @@ void ZookeeperManager::InnerStringsStatCompletion(
   ZookeeperManager &manager = up_context->m_zookeeper_manager;
 
   if (ret_code == ZOK) {
-    // 处理Watcher
     manager.ProcAsyncWatcher(*up_context);
   }
 
@@ -2321,7 +2136,6 @@ void ZookeeperManager::InnerStringCompletion(int ret_code, const char *value,
 
   ZookeeperManager &manager = up_context->m_zookeeper_manager;
 
-  // 成功调用, 处理临时节点
   if (ret_code == ZOK && up_context->m_ephemeral_info != NULL &&
       !up_context->m_ephemeral_path.empty()) {
     std::unique_lock<std::mutex> ephemeral_node_info_lock(
@@ -2369,7 +2183,6 @@ void ZookeeperManager::InnerMultiCompletion(int ret_code,
 
   ZookeeperManager &manager = up_context->m_zookeeper_manager;
 
-  // 处理临时节点, 这里可能会出现部分成功部分失败的情况
   manager.ProcMultiEphemeralNode(up_context->m_multi_ops->m_multi_ops,
                                  *up_context->m_multi_results);
 
@@ -2412,8 +2225,6 @@ std::shared_ptr<ZookeeperCtx> ZookeeperManager::GetCustomWatcherCtx(
     }
   }
 
-  ///// 假设 同一abs_path与watcher type, 只添加一次custom watcher context,
-  ///也不会并发添加
   if (p_zookeeper_watcher_context == nullptr) {
     p_zookeeper_watcher_context =
         make_shared<ZookeeperCtx>(*this, (ZookeeperCtx::WatcherType)type);
@@ -2437,7 +2248,6 @@ void ZookeeperManager::DelCustomWatcherCtx(
   auto find_its = m_custom_watcher_contexts_.equal_range(abs_path);
   for (auto it = find_its.first; it != find_its.second; ++it) {
     if (it->second.get() == watcher_context) {
-      // 这里erase之后, it不能再使用, 后面如果要修改, 需要注意
       m_custom_watcher_contexts_.erase(it);
       M_LOG_SPCL << "delete custom watcher: abs_path[" << abs_path << "]";
       return;
@@ -2446,16 +2256,12 @@ void ZookeeperManager::DelCustomWatcherCtx(
 }
 
 bool ZookeeperManager::ResumeEnv() {
-  // 重新注册所有的Watcher
   bool is_ok = true;
   if (!ResumeGlobalWatcher()) M_LOG_ERROR << "resume global watcher failed!";
   if (!ResumeCustomWatcher()) M_LOG_ERROR << "resume custom watcher failed!";
   is_ok = ResumeEphemeralNode();
   if (!is_ok) M_LOG_ERROR << "resume eephemeral node failed!";
-  // 重新注册所有的临时节点
   return is_ok;
-
-  //    m_need_resume_env = false;
 }
 
 bool ZookeeperManager::ResumeGlobalWatcher() {
@@ -2544,7 +2350,6 @@ bool ZookeeperManager::ResumeGlobalWatcher() {
 bool ZookeeperManager::ResumeCustomWatcher() {
   bool is_ok = true;
   int32_t ret = ZOK;
-  // 重新注册自定义Watcher
   M_LOG_SPCL << "start re-registering custom Watcher...";
   auto m_custom_watcher_contexts_ = GetCustomWatcherContexts();
   for (auto it = m_custom_watcher_contexts_.begin();
@@ -2618,7 +2423,6 @@ bool ZookeeperManager::ResumeCustomWatcher() {
 bool ZookeeperManager::ResumeEphemeralNode() {
   bool is_ok = true;
   int32_t ret = ZOK;
-  // 重新注册所有的临时节点
   M_LOG_SPCL << "start re-creating tmp node...";
   auto m_ephemeral_node_info = GetEphemeralNodeInfo();
   for (auto it = m_ephemeral_node_info.begin();
@@ -2629,14 +2433,11 @@ bool ZookeeperManager::ResumeEphemeralNode() {
         sleep((resume_count - 1) <= 10 ? (resume_count - 1) : 10);
       M_LOG_SPCL << "re-create tmp node, path[" << it->first << "], data["
                  << it->second.data << "], on " << resume_count << " time";
-      // 先尝试创建一下临时节点, 如果失败提示节点不存在, 表示父节点不存在,
-      // 创建父节点后重试一次
       ret = zoo_create(m_zhandle_, it->first.c_str(), it->second.data.c_str(),
                        it->second.data.size(), &it->second.acl,
                        it->second.flags, NULL, 0);
 
       if (ret == ZNONODE) {
-        // 递归创建父节点
         auto last_slash_pos = it->first.rfind('/');
         if (last_slash_pos == string::npos) {
           M_LOG_ERROR << "can not create parent node, invalid tmp node path: "
@@ -2653,7 +2454,6 @@ bool ZookeeperManager::ResumeEphemeralNode() {
         string parent_path = it->first.substr(0, last_slash_pos);
         ret = CreatePathRecursion(parent_path);
         if (ret != ZOK) {
-          // 重试一次
           ret = CreatePathRecursion(parent_path);
           if (ret != ZOK) {
             if (ret == ZNODEEXISTS) {
@@ -2670,7 +2470,6 @@ bool ZookeeperManager::ResumeEphemeralNode() {
           }
         }
 
-        // 重新创建临时节点, 错误码在外层判断
         ret = zoo_create(m_zhandle_, it->first.c_str(), it->second.data.c_str(),
                          it->second.data.size(), &it->second.acl,
                          it->second.flags, NULL, 0);
@@ -2684,7 +2483,6 @@ bool ZookeeperManager::ResumeEphemeralNode() {
       }
 
       if (ret != ZOK) {
-        // 重试一次
         ret = zoo_create(m_zhandle_, it->first.c_str(), it->second.data.c_str(),
                          it->second.data.size(), &it->second.acl,
                          it->second.flags, NULL, 0);
@@ -2714,8 +2512,6 @@ bool ZookeeperManager::ResumeEphemeralNode() {
 void ZookeeperManager::ProcMultiEphemeralNode(
     const vector<zoo_op> &multi_ops,
     const vector<zoo_op_result_t> &multi_result) {
-  // 处理临时节点, 这里可能会出现部分调用成功, 部分调用失败的情况,
-  // 目前只把成功的写到临时节点数据中
   auto result_it = multi_result.begin();
   for (auto zoo_op_it = multi_ops.begin();
        zoo_op_it != multi_ops.end() && result_it != multi_result.end();
@@ -2730,7 +2526,6 @@ void ZookeeperManager::ProcMultiEphemeralNode(
         (zoo_op_it->create_op.flags & ZOO_EPHEMERAL)) {
       std::unique_lock<std::mutex> ephemeral_node_info_lock(
           m_ephemeral_node_info_lock_);
-      // 如果是临时节点, 添加到临时节点列表中。
       m_ephemeral_node_info_[zoo_op_it->create_op.path].acl =
           *zoo_op_it->create_op.acl;
       m_ephemeral_node_info_[zoo_op_it->create_op.path].data.assign(
@@ -2755,7 +2550,6 @@ void ZookeeperManager::ProcMultiEphemeralNode(
       } else if (zoo_op_it->type == ZOO_SETDATA_OP &&
                  m_ephemeral_node_info_.find(zoo_op_it->create_op.path) !=
                      m_ephemeral_node_info_.end()) {
-        // 如果在临时节点列表中找到, 修改数据
         m_ephemeral_node_info_[zoo_op_it->create_op.path].data.assign(
             zoo_op_it->create_op.data, zoo_op_it->create_op.data_len);
       } else {
@@ -2768,13 +2562,11 @@ void ZookeeperManager::ProcMultiEphemeralNode(
 void ZookeeperManager::ProcAsyncWatcher(ZookeeperCtx &context) {
   if (!context.m_watch_path.empty()) {
     if (context.m_global_watcher_add_type != 0) {
-      // 全局Watcher
       std::unique_lock<std::mutex> global_watcher_path_type_lock(
           m_global_watcher_path_type_mutex_);
       m_global_watcher_path_type_[context.m_watch_path] |=
           context.m_global_watcher_add_type;
     } else if (context.m_custom_watcher_context != NULL) {
-      // 自定义Watcher
       AddCustomWatcher(context.m_watch_path, context.m_custom_watcher_context);
     } else {
       M_LOG_ERROR
